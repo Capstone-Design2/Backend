@@ -6,8 +6,8 @@ pydantic-settings==2.1.0
 
 # 데이터베이스
 sqlalchemy==2.0.23
-sqlmodel==0.0.10
-asyncpg==0.29.0  # PostgreSQL 비동기 드라이버
+sqlmodel==0.0.25
+asyncpg==0.30.0  # PostgreSQL 비동기 드라이버
 greenlet==3.0.3  # SQLAlchemy 비동기 지원
 alembic==1.13.1
 
