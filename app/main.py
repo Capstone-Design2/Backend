@@ -8,6 +8,7 @@ from logging import getLogger
 from logging.config import dictConfig
 from os import environ
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,6 +26,9 @@ async def lifespan(app: FastAPI):
 
 
 logger = getLogger(__name__)
+
+# 환경변수 세팅
+load_dotenv()
 
 app = FastAPI(
     docs_url=(
