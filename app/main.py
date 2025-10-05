@@ -16,9 +16,12 @@ from fastapi.responses import JSONResponse
 
 from app.database import init_db
 from app.routers import user_router
+from app.routers.auth_router import router as auth_router  # ✅ 추가
 from app.utils.logger import sample_logger
 
-
+# ----------------------------------------------------------------------
+# Lifespan: 앱 시작 시 DB 초기화
+# ----------------------------------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
@@ -27,36 +30,50 @@ async def lifespan(app: FastAPI):
 
 logger = getLogger(__name__)
 
-# 환경변수 세팅
+# ----------------------------------------------------------------------
+# 환경 변수 로드 (.env)
+# ----------------------------------------------------------------------
 load_dotenv()
 
+# ----------------------------------------------------------------------
+# FastAPI 애플리케이션 생성
+# ----------------------------------------------------------------------
 app = FastAPI(
+    title="Algorithm Trading Backend",
+    description="FastAPI 기반 알고리즘 트레이딩 백엔드 API",
+    version="1.0.0",
     docs_url=(
         "/caps_lock/api/docs"
-        if environ.get("DEPLOY_PHASE", "dev") == "dev"
-        or environ.get("DEPLOY_PHASE", "dev") == "local"
+        if environ.get("DEPLOY_PHASE", "dev") in ("dev", "local")
         else None
     ),
     lifespan=lifespan,
 )
 
+# ----------------------------------------------------------------------
+# 로거 설정
+# ----------------------------------------------------------------------
 dictConfig(sample_logger)
 
-
+# ----------------------------------------------------------------------
+# 예외 핸들러
+# ----------------------------------------------------------------------
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    # 실패한 요청에 대한 자세한 정보를 로그로 남깁니다.
     logger.error(
-        f"Invalid request: {request.__dict__} - Errors: {exc.errors()}")
-    # 클라이언트에게 구체적인 에러 메시지를 반환합니다.
+        f"Invalid request: {request.__dict__} - Errors: {exc.errors()}"
+    )
     return JSONResponse(
         status_code=422,
-        content={"detail": exc.errors(), "body": exc.body},
+        content={"detail": exc.errors()}
     )
 
-
+# ----------------------------------------------------------------------
+# CORS 설정
+# ----------------------------------------------------------------------
 origins = [
     "http://localhost:8000",
+    "http://127.0.0.1:8000",
 ]
 
 app.add_middleware(
@@ -67,10 +84,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ----------------------------------------------------------------------
 # 라우터 등록
-app.include_router(user_router)
+# ----------------------------------------------------------------------
+app.include_router(auth_router)  # ✅ JWT 관련 라우터 등록
+app.include_router(user_router)  # 사용자 CRUD 라우터 등록
 
-
+# ----------------------------------------------------------------------
+# 기본 라우트
+# ----------------------------------------------------------------------
 @app.get("/")
 async def root():
-    return {"message": "Hello World"}
+    return {"message": "Hello, Algorithm Trading Backend!"}
