@@ -39,7 +39,7 @@ load_dotenv()
 # FastAPI 애플리케이션 생성
 # ----------------------------------------------------------------------
 app = FastAPI(
-    title="Algorithm Trading Backend",
+    title="Algorithm Trading System",
     description="FastAPI 기반 알고리즘 트레이딩 백엔드 API",
     version="1.0.0",
     docs_url=(
@@ -95,4 +95,4 @@ app.include_router(user_router)  # 사용자 CRUD 라우터 등록
 # ----------------------------------------------------------------------
 @app.get("/")
 async def root():
-    return {"message": "Hello, Algorithm Trading Backend!"}
+    return {"message": "Hello, World!"}

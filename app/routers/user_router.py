@@ -135,11 +135,11 @@ async def get_users(
     },
 )
 async def update_user(
+    current_user: Annotated[UserResponse, Depends(get_current_user)],  # ✅ JWT 필요
     user_id: int,
     update_data: UserUpdateRequest,
     service: Annotated[UserService, Depends(get_user_service)],
     db: Annotated[AsyncSession, Depends(get_session)],
-    current_user: Annotated[UserResponse, Depends(get_current_user)],  # ✅ JWT 필요
 ):
     """
     특정 사용자의 정보를 수정합니다 (JWT 필요).
@@ -177,10 +177,10 @@ async def update_user(
     },
 )
 async def delete_user(
+    current_user: Annotated[UserResponse, Depends(get_current_user)],  # ✅ JWT 필요
     user_id: int,
     service: Annotated[UserService, Depends(get_user_service)],
     db: Annotated[AsyncSession, Depends(get_session)],
-    current_user: Annotated[UserResponse, Depends(get_current_user)],  # ✅ JWT 필요
 ):
     """
     특정 사용자를 삭제합니다 (JWT 필요).
