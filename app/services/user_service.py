@@ -1,6 +1,6 @@
+# services/user_service.py
 import logging
 from typing import Optional
-
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.repositories.user_repository import UserRepository

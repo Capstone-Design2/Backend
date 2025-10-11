@@ -1,3 +1,4 @@
+# services/auth_service.py
 import logging
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
