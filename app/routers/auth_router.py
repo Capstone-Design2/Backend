@@ -6,8 +6,9 @@ from app.database import get_session as get_db
 from app.schemas.auth_schema import TokenPair, TokenRefreshRequest
 from app.services.auth_service import AuthService
 from app.utils.deps import get_current_user
+from app.utils.router_utils import get_router
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = get_router("auth")
 
 # (A) 폼 방식(OAuth2PasswordRequestForm) - Swagger Try it out에 잘 맞음
 @router.post("/login", response_model=TokenPair)
@@ -18,7 +19,7 @@ async def login(
     svc = AuthService(db)
     access, refresh = await svc.login(
         email=form_data.username,
-        password=form_data.password,
+        password=form_data.password
     )
     return TokenPair(access_token=access, refresh_token=refresh)
 
