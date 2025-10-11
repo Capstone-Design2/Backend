@@ -1,10 +1,10 @@
-import hashlib
 from typing import Optional
-
 from sqlmodel import Field
-
+from passlib.context import CryptContext
 from app.models.base import BaseModel
+from app.utils.security import get_password_hash, verify_password as _verify
 
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 class User(BaseModel, table=True):
     """
@@ -19,39 +19,24 @@ class User(BaseModel, table=True):
     )
     name: str = Field(max_length=50, description="사용자명")
     email: str = Field(max_length=100, description="이메일", unique=True)
-    hashed_password: str = Field(max_length=255, description="해시된 비밀번호")
+    password_hash: str = Field(max_length=255, description="bcrypt로 해시된 비밀번호")
 
     @classmethod
     def hash_password(cls, password: str) -> str:
         """
-        비밀번호를 해시화합니다.
-
-        Args:
-            password: 원본 비밀번호
-
-        Returns:
-            해시된 비밀번호
+        비밀번호를 bcrypt로 해싱
         """
-        return hashlib.sha256(password.encode()).hexdigest()
+        return get_password_hash(password)
 
     def verify_password(self, password: str) -> bool:
         """
-        비밀번호를 검증합니다.
-
-        Args:
-            password: 검증할 비밀번호
-
-        Returns:
-            비밀번호 일치 여부
+        입력한 비밀번호가 저장된 해시와 일치하는지 검증
         """
-        return self.hashed_password == self.hash_password(password)
+        return _verify(password, self.password_hash)
 
     def to_dict(self) -> dict:
         """
-        User 객체를 딕셔너리로 변환합니다 (비밀번호 제외).
-
-        Returns:
-            사용자 정보 딕셔너리
+        비밀번호 제외한 사용자 정보 딕셔너리
         """
         return {
             "id": self.id,
