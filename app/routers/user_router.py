@@ -11,10 +11,10 @@ from app.schemas import (
     UserResponse,
     UserUpdateRequest,
 )
-from app.services import UserService
-from app.utils.dependencies import get_user_service
+from app.services.user_service import UserService
 from app.utils.router_utils import get_router
-from app.utils.deps import get_current_user  # ✅ JWT 인증용 의존성 추가
+from app.utils.dependencies import get_user_service
+from app.utils.dependencies import get_current_user  # ✅ JWT 인증용 의존성 추가
 
 # 라우터 생성
 router = get_router("user")
@@ -66,10 +66,10 @@ async def create_user(
     },
 )
 async def get_user(
-    current_user: Annotated[UserResponse, Depends(get_current_user)],  # ✅ 인증된 사용자만 접근 가능
     user_id: int,
     service: Annotated[UserService, Depends(get_user_service)],
     db: Annotated[AsyncSession, Depends(get_session)],
+    current_user: Annotated[UserResponse, Depends(get_current_user)],  # ✅ 인증된 사용자만 접근 가능
 ):
     """
     ID로 특정 사용자를 조회합니다.
@@ -99,9 +99,9 @@ async def get_user(
     },
 )
 async def get_users(
-    current_user: Annotated[UserResponse, Depends(get_current_user)],  # ✅ 보호된 엔드포인트
     service: Annotated[UserService, Depends(get_user_service)],
     db: Annotated[AsyncSession, Depends(get_session)],
+    current_user: Annotated[UserResponse, Depends(get_current_user)],  # ✅ 보호된 엔드포인트
     skip: int = 0,
     limit: int = 100,
 ):
@@ -135,11 +135,11 @@ async def get_users(
     },
 )
 async def update_user(
-    current_user: Annotated[UserResponse, Depends(get_current_user)],  # ✅ JWT 필요
     user_id: int,
     update_data: UserUpdateRequest,
     service: Annotated[UserService, Depends(get_user_service)],
     db: Annotated[AsyncSession, Depends(get_session)],
+    current_user: Annotated[UserResponse, Depends(get_current_user)],  # ✅ JWT 필요
 ):
     """
     특정 사용자의 정보를 수정합니다 (JWT 필요).
@@ -177,10 +177,10 @@ async def update_user(
     },
 )
 async def delete_user(
-    current_user: Annotated[UserResponse, Depends(get_current_user)],  # ✅ JWT 필요
     user_id: int,
     service: Annotated[UserService, Depends(get_user_service)],
     db: Annotated[AsyncSession, Depends(get_session)],
+    current_user: Annotated[UserResponse, Depends(get_current_user)],  # ✅ JWT 필요
 ):
     """
     특정 사용자를 삭제합니다 (JWT 필요).

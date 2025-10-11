@@ -20,8 +20,8 @@ class UserService:
     사용자 관련 비즈니스 로직을 담당하는 Service 클래스
     """
 
-    def __init__(self):
-        self.user_repository = UserRepository()
+    def __init__(self, user_repository: Optional[UserRepository] = None):
+        self.user_repository = user_repository or UserRepository()
 
     async def create_user(
         self, db: AsyncSession, user_data: UserCreateRequest

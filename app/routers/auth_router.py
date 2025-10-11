@@ -5,7 +5,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from app.database import get_session as get_db
 from app.schemas.auth_schema import TokenPair, TokenRefreshRequest
 from app.services.auth_service import AuthService
-from app.utils.deps import get_current_user
+from app.utils.dependencies import get_current_user
 from app.utils.router_utils import get_router
 
 router = get_router("auth")
