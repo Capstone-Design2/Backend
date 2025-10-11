@@ -19,6 +19,10 @@ from app.routers import user_router
 from app.routers.auth_router import router as auth_router  # ✅ 추가
 from app.utils.logger import sample_logger
 
+from types import SimpleNamespace
+from app.utils.dependencies import get_current_user
+from app.core.config import settings
+
 # ----------------------------------------------------------------------
 # Lifespan: 앱 시작 시 DB 초기화
 # ----------------------------------------------------------------------
@@ -49,6 +53,15 @@ app = FastAPI(
     ),
     lifespan=lifespan,
 )
+
+# ----------------------------------------------------------------------
+# User 인증 생략
+# ----------------------------------------------------------------------
+if settings.SKIP_AUTH and settings.DEPLOY_PHASE in ("dev", "local"):
+    def _fake_current_user():
+        # 필요하면 DB에서 1번 유저를 읽어 반환하도록 바꿔도 됨
+        return SimpleNamespace(id=1, email="dev@example.com", name="Dev User", role="admin")
+    app.dependency_overrides[get_current_user] = _fake_current_user
 
 # ----------------------------------------------------------------------
 # 로거 설정
