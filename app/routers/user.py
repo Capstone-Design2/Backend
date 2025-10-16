@@ -11,7 +11,7 @@ from app.schemas import (
     UserResponse,
     UserUpdateRequest,
 )
-from app.services.user_service import UserService
+from app.services.user import UserService
 from app.utils.router import get_router
 from app.utils.dependencies import get_user_service
 from app.utils.dependencies import get_current_user  # ✅ JWT 인증용 의존성 추가
