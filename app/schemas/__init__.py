@@ -4,7 +4,7 @@ API 스키마 모듈
 Request/Response 스키마들을 정의합니다.
 """
 
-from .user_schema import (ErrorResponse, UserCreateRequest, UserListResponse,
+from .user import (ErrorResponse, UserCreateRequest, UserListResponse,
                           UserResponse, UserUpdateRequest)
 
 __all__ = [

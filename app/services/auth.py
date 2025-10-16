@@ -1,9 +1,9 @@
-# services/auth_service.py
+# services/auth.py
 import logging
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.repositories.user_repository import UserRepository
+from app.repositories.user import UserRepository
 from app.utils.security import (
     verify_password,
     create_access_token,

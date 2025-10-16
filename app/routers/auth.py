@@ -1,12 +1,12 @@
-# routers/auth_router.py
+# routers/auth.py
 from typing import Annotated
 from fastapi import APIRouter, Depends
 from fastapi.security import OAuth2PasswordRequestForm
 
-from app.schemas.auth_schema import TokenPair, TokenRefreshRequest
-from app.services.auth_service import AuthService
+from app.schemas.auth import TokenPair, TokenRefreshRequest
+from app.services.auth import AuthService
 from app.utils.dependencies import get_current_user, get_auth_service
-from app.utils.router_utils import get_router
+from app.utils.router import get_router
 from app.models.user import User
 
 router = get_router("auth")

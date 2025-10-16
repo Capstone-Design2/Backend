@@ -7,7 +7,7 @@ API 엔드포인트들을 정의합니다.
 
 from fastapi import APIRouter
 
-from .user_router import router as user_router
+from .user import router as user_router
 
 __all__ = [
     "user_router",

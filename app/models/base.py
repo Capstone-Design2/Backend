@@ -2,32 +2,40 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import Column, func
-from sqlalchemy.types import TIMESTAMP, Integer
-from sqlmodel import Field, SQLModel
+from sqlalchemy.types import TIMESTAMP, Boolean
+from sqlmodel import SQLModel, Field
 
 
 class BaseModel(SQLModel):
     """
-    공통 생성/수정/삭제여부 필드를 포함하는 기본 모델
-    모든 테이블에 is_deleted, created_at, updated_at 컬럼을 추가합니다.
+    모든 테이블에 공통으로 포함되는 기본 필드:
+    - is_deleted: 소프트 삭제 여부
+    - created_at: 생성 시각 (UTC)
+    - updated_at: 수정 시각 (UTC)
     """
-    # is_deleted: bool = Field(
-    #     default=False, nullable=False, description="삭제 여부")
 
-    created_at: Optional[datetime] = Field(
-        default=None,
-        sa_column_kwargs={
-            "server_default": func.now(),
-            "nullable": True,
-            "comment": "레코드 생성일시"
-        }
+    is_deleted: bool = Field(
+        default=False,
+        sa_column=Column(Boolean, nullable=False, server_default="false", comment="삭제 여부")
     )
+
+    created_at: datetime = Field(
+        default_factory=datetime.utcnow,
+        sa_column=Column(
+            TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=func.now(),
+            comment="레코드 생성일시 (UTC)"
+        ),
+    )
+
     updated_at: Optional[datetime] = Field(
         default=None,
-        sa_column_kwargs={
-            "server_default": func.now(),
-            "onupdate": func.now(),
-            "nullable": True,
-            "comment": "레코드 수정일시"
-        }
+        sa_column=Column(
+            TIMESTAMP(timezone=True),
+            nullable=True,
+            server_default=func.now(),
+            onupdate=func.now(),
+            comment="레코드 수정일시 (UTC)"
+        ),
     )
