@@ -98,6 +98,8 @@ docker run -p 8000:8000 fastapi-backend
 - **Swagger UI**: http://localhost:8000/caps_lock/api/docs
 - **ReDoc**: http://localhost:8000/redoc
 
+- **최종 구현까지 인증 생략하는 방법 -> .env 파일에 'SKIP_AUTH=true' 한 줄 추가**
+
 ## 🏗️ 아키텍처
 
 이 프로젝트는 **레이어드 아키텍처(Layered Architecture)** 패턴을 따릅니다:
