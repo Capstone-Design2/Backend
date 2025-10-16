@@ -16,7 +16,12 @@ class BaseModel(SQLModel):
 
     is_deleted: bool = Field(
         default=False,
-        sa_column=Column(Boolean, nullable=False, server_default="false", comment="삭제 여부")
+        sa_column=Column(
+            Boolean,
+            nullable=False,
+            server_default="false",
+            comment="삭제 여부 (soft delete)"
+        ),
     )
 
     created_at: datetime = Field(
