@@ -95,7 +95,7 @@ docker run -p 8000:8000 fastapi-backend
 
 서버 실행 후 다음 URL에서 API 문서를 확인할 수 있습니다:
 
-- **Swagger UI**: http://localhost:8000/docs
+- **Swagger UI**: http://localhost:8000/caps_lock/api/docs
 - **ReDoc**: http://localhost:8000/redoc
 
 ## 🏗️ 아키텍처
