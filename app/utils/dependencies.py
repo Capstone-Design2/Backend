@@ -7,7 +7,10 @@ from app.database import get_session
 from app.repositories.user import UserRepository
 from app.services.user import UserService
 from app.services.auth import AuthService
+from app.services.ticker import TickerService
 from app.utils.security import decode_token
+from app.utils.kis_auth import get_kis_auth_manager, KISAuthManager
+
 
 # Swagger에서 Authorize → 토큰만 입력해도 Bearer 자동으로 붙음
 auth_scheme = HTTPBearer()
@@ -51,3 +54,8 @@ async def get_current_user(
         )
         
     return user
+
+async def get_ticker_service(
+    auth_manager: KISAuthManager = Depends(get_kis_auth_manager),
+) -> TickerService:
+    return TickerService(auth_manager=auth_manager)
