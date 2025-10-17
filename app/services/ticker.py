@@ -4,7 +4,7 @@ from typing import Dict, List, Optional
 import re
 
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.ticker import Ticker
@@ -162,5 +162,21 @@ class TickerService:
             total_synced=total,
             per_market_counts=per_market,
             files_processed=processed,
-            notes="(market, symbol)으로 업서트합니다. 종목 번호는 pdno+suffix이고, kis_code는 6자리입니다.",
         )
+        
+    async def load_kis_to_ticker_id(self, db) -> Dict[str, int]:
+        """
+        tickers 테이블에서 (kis_code -> ticker_id) 맵 생성
+        - 주식 3시장 (KOSPI/KOSDAQ/KONEX)
+        """
+        stmt = (
+            select(
+                Ticker.__table__.c.kis_code,
+                Ticker.__table__.c.ticker_id,
+            )
+            .where(Ticker.__table__.c.market.in_(["KOSPI", "KOSDAQ", "KONEX"]))
+            .where(Ticker.__table__.c.kis_code.isnot(None))
+        )
+        rows = (await db.execute(stmt)).all()
+        return {kis: tid for kis, tid in rows if kis and SIX_DIGIT.fullmatch(kis)}
+        

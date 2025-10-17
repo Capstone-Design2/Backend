@@ -1,11 +1,10 @@
-from datetime import datetime, timezone
-
+# app/models/price_data.py
+from datetime import datetime
 from typing import Optional
 from decimal import Decimal
 
-from sqlalchemy import Column, Index, UniqueConstraint, CheckConstraint,text, BigInteger
-from sqlalchemy import DateTime
-from sqlalchemy.types import Numeric
+from sqlalchemy import Column, UniqueConstraint, CheckConstraint, BigInteger, String, text, Index
+from sqlalchemy.types import Numeric, DateTime, Boolean
 from sqlmodel import Field
 from app.models.base import BaseModel
 
@@ -13,8 +12,8 @@ from app.models.base import BaseModel
 class PriceData(BaseModel, table=True):
     """
     시세(OHLCV) 시계열 데이터
-    - (ticker_id, timestamp, timeframe, source) 유니크 인덱스 권장
-    - timestamp는 UTC
+    - (ticker_id, timestamp, timeframe, source) 유니크
+    - timestamp는 UTC (timezone=True)
     """
 
     __tablename__ = "price_data"
@@ -22,7 +21,8 @@ class PriceData(BaseModel, table=True):
         UniqueConstraint("ticker_id", "timestamp", "timeframe", "source",
                         name="uq_price_ticker_ts_tf_source"),
         CheckConstraint("timeframe IN ('1D','1h','30m','15m','5m','1m')",
-                        name="ck_price_timeframe"),  
+                        name="ck_price_timeframe"),
+        Index("ix_price_ticker_ts", "ticker_id", "timestamp"),
     )
 
     price_id: Optional[int] = Field(
@@ -33,71 +33,52 @@ class PriceData(BaseModel, table=True):
     )
 
     ticker_id: int = Field(
-        foreign_key="tickers.ticker_id",
-        nullable=False,
-        description="티커 ID",
+        description="티커 ID(FK)"
     )
 
     timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None),
-        nullable=False,
-        description="캔들 시각(UTC)",
-        sa_column=Column(DateTime(timezone=False)),
-    )
-
-    open: Optional[Decimal] = Field(
-        default=None,
-        sa_column=Column(Numeric(20, 8, asdecimal=True)),
-        description="시가",
-    )
-
-    high: Optional[Decimal] = Field(
-        default=None,
-        sa_column=Column(Numeric(20, 8, asdecimal=True)),
-        description="고가",
-    )
-
-    low: Optional[Decimal] = Field(
-        default=None,
-        sa_column=Column(Numeric(20, 8, asdecimal=True)),
-        description="저가",
-    )
-
-    close: Optional[Decimal] = Field(
-        default=None,
-        sa_column=Column(Numeric(20, 8, asdecimal=True)),
-        description="종가",
-    )
-
-    volume: Optional[int] = Field(
-        default=None,
-        description="거래량",
-        sa_column=Column(BigInteger)
+        description="UTC 타임스탬프",
+        sa_column=Column(
+            DateTime(timezone=True),
+            nullable=False,                     
+        ),
     )
 
     timeframe: str = Field(
-        max_length=10,
-        nullable=False,
-        description="캔들 주기 (1D, 1h, 5m ...)",
+        description="캔들 주기 (1D,1h,30m,15m,5m,1m)",
+        sa_column=Column(String(3), nullable=False)
+    )
+
+    open: Optional[Decimal] = Field(
+        description="시가",
+        sa_column=Column(Numeric(20, 6), nullable=True)
+    )
+    high: Optional[Decimal] = Field(
+        description="고가",
+        sa_column=Column(Numeric(20, 6), nullable=True)
+    )
+    low: Optional[Decimal] = Field(
+        description="저가",
+        sa_column=Column(Numeric(20, 6), nullable=True)
+    )
+    close: Optional[Decimal] = Field(
+        description="종가",
+        sa_column=Column(Numeric(20, 6), nullable=True)
+    )
+
+    volume: Optional[int] = Field(
+        description="거래량",
+        sa_column=Column(BigInteger, nullable=True)
     )
 
     source: str = Field(
         default="KIS",
-        max_length=20,
-        description="수집 소스 (YFINANCE/KIS)",
+        description="데이터 출처",
+        sa_column=Column(String(16), nullable=False, server_default=text("'KIS'"))
     )
 
     is_adjusted: bool = Field(
         default=False,
-        description="배당/분할 조정 여부",
-        sa_column_kwargs={"server_default": text("0")}
+        description="배당/분할 반영 여부",
+        sa_column=Column(Boolean, nullable=False, server_default=text("false"))
     )
-
-
-# 조회 최적화용 인덱스
-Index(
-    "ix_price_ticker_tf_ts",
-    PriceData.__table__.c.ticker_id,
-    PriceData.__table__.c.timeframe,
-    PriceData.__table__.c.timestamp,
-)
