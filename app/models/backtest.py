@@ -4,8 +4,8 @@ from typing import Optional
 from decimal import Decimal
 
 from sqlalchemy import Column,CheckConstraint, UniqueConstraint
-from sqlalchemy.dialects.mysql import JSON as MYSQL_JSON
-from sqlalchemy.dialects.mysql import DATETIME as MYSQL_DATETIME
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import DateTime
 from sqlalchemy.types import Numeric
 from sqlmodel import Field
 from app.models.base import BaseModel
@@ -79,7 +79,7 @@ class BacktestJob(BaseModel, table=True):
         default=None,
         primary_key=True,
         description="완료 시각(UTC)",
-        sa_column=Column(MYSQL_DATETIME(fsp=6)),
+        sa_column=Column(DateTime(timezone=False)),
     )
 
 
@@ -129,12 +129,12 @@ class BacktestResult(BaseModel, table=True):
         default_factory=dict,
         description="기타 성과지표(JSON)",
         nullable=False,
-        sa_column=Column(MYSQL_JSON),
+        sa_column=Column(JSONB),
     )
 
     equity_curve: list = Field(
         default_factory=list,
         description="자산 곡선 (list of {ts, equity})",
         nullable=False,
-        sa_column=Column(MYSQL_JSON),
+        sa_column=Column(JSONB),
     )
