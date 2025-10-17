@@ -46,6 +46,7 @@ Backend/
 │   │   ├── __init__.py
 │   │   ├── datetime.py         # 날짜/시간 유틸
 │   │   ├── dependencies.py     # get_current_user 등 DI 의존성
+│   │   ├── kis_auth.py         # KIS 인증 로직 (토큰 발급)
 │   │   ├── logger.py           # 로깅 설정/헬퍼
 │   │   ├── router.py           # 라우터 공통 유틸
 │   │   └── security.py         # 해시/검증, JWT 유틸, OAuth2 스킴
