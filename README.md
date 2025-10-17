@@ -11,8 +11,8 @@ Backend/
 │   │   └── config.py           # 설정(환경 변수 로딩, Settings 클래스 등)
 │   ├── models/                 # 데이터베이스 모델 (SQLAlchemy)
 │   │   ├── __init__.py
-│   │   ├── base.py             # Base 클래스 (declarative_base 등)
 │   │   ├── backtest.py         # 백테스트 모델
+│   │   ├── base.py             # Base 클래스 (declarative_base 등)
 │   │   ├── execution.py        # 체결 모델
 │   │   ├── order.py            # 주문 모델
 │   │   ├── paper_trading.py    # 모의투자 모델
@@ -25,25 +25,25 @@ Backend/
 │   │   └── watchlist.py        # 관심종목 모델
 │   ├── repositories/           # 데이터 접근 계층 (DB 쿼리 로직)
 │   │   ├── __init__.py
-│   │   └── user_repository.py  # 사용자 CRUD
+│   │   └── user.py  # 사용자 CRUD
 │   ├── routers/                # API 라우터
 │   │   ├── __init__.py
-│   │   ├── user_router.py      # 사용자 API
-│   │   └── auth_router.py      # 인증/인가 API (로그인/토큰 갱신 등)
+│   │   ├── auth.py             # 인증/인가 API (로그인/토큰 갱신 등)
+│   │   └── user.py             # 사용자 API
 │   ├── schemas/                # Pydantic 스키마 (요청/응답)
 │   │   ├── __init__.py
-│   │   ├── user_schema.py      # 사용자 스키마
-│   │   └── auth_schema.py      # 토큰/로그인 스키마
+│   │   ├── auth.py             # 토큰/로그인 스키마
+│   │   └── user.py             # 사용자 스키마
 │   ├── services/               # 비즈니스 로직 계층
 │   │   ├── __init__.py
-│   │   ├── user_service.py     # 사용자 서비스
-│   │   └── auth_service.py     # 인증 로직 (패스워드 검증, 토큰 발급)
+│   │   ├── auth.py             # 인증 로직 (패스워드 검증, 토큰 발급)
+│   │   └── user.py             # 사용자 서비스
 │   ├── utils/                  # 유틸리티
 │   │   ├── __init__.py
-│   │   ├── datetime_utils.py   # 날짜/시간 유틸
+│   │   ├── datetime.py         # 날짜/시간 유틸
 │   │   ├── dependencies.py     # get_current_user 등 DI 의존성
 │   │   ├── logger.py           # 로깅 설정/헬퍼
-│   │   ├── router_utils.py     # 라우터 공통 유틸
+│   │   ├── router.py           # 라우터 공통 유틸
 │   │   └── security.py         # 해시/검증, JWT 유틸, OAuth2 스킴
 │   ├── __init__.py
 │   ├── database.py             # DB 연결/세션 관리
