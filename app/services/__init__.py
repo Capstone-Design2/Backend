@@ -5,7 +5,7 @@
 Repository와 Controller 사이의 중간 계층입니다.
 """
 
-from .user_service import UserService
+from .user import UserService
 
 __all__ = [
     "UserService",

@@ -1,4 +1,4 @@
-# schemas/auth_schema.py
+# schemas/auth.py
 from pydantic import BaseModel, EmailStr
 
 class LoginRequest(BaseModel):

@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 
 from app.database import init_db
 from app.routers import user_router
-from app.routers.auth_router import router as auth_router  # ✅ 추가
+from app.routers.auth import router as auth_router  # ✅ 추가
 from app.utils.logger import sample_logger
 
 from types import SimpleNamespace

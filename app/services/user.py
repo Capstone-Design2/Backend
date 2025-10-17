@@ -1,9 +1,9 @@
-# services/user_service.py
+# services/user.py
 import logging
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.repositories.user_repository import UserRepository
+from app.repositories.user import UserRepository
 from app.schemas import (
     ErrorResponse,
     UserCreateRequest,

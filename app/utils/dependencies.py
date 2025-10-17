@@ -4,9 +4,9 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.repositories.user_repository import UserRepository
-from app.services.user_service import UserService
-from app.services.auth_service import AuthService
+from app.repositories.user import UserRepository
+from app.services.user import UserService
+from app.services.auth import AuthService
 from app.utils.security import decode_token
 
 # Swagger에서 Authorize → 토큰만 입력해도 Bearer 자동으로 붙음

@@ -1,4 +1,4 @@
-# routers/user_router.py
+# routers/user.py
 from typing import Annotated
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,8 +11,8 @@ from app.schemas import (
     UserResponse,
     UserUpdateRequest,
 )
-from app.services.user_service import UserService
-from app.utils.router_utils import get_router
+from app.services.user import UserService
+from app.utils.router import get_router
 from app.utils.dependencies import get_user_service
 from app.utils.dependencies import get_current_user  # ✅ JWT 인증용 의존성 추가
 
