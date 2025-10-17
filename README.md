@@ -48,6 +48,7 @@ Backend/
 │   │   ├── dependencies.py     # get_current_user 등 DI 의존성
 │   │   ├── kis_auth.py         # KIS 인증 로직 (토큰 발급)
 │   │   ├── logger.py           # 로깅 설정/헬퍼
+│   │   ├── mst_parser.py       # 주식 데이터 파일 parsing 정규식
 │   │   ├── router.py           # 라우터 공통 유틸
 │   │   └── security.py         # 해시/검증, JWT 유틸, OAuth2 스킴
 │   ├── __init__.py
