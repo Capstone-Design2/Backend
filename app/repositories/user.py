@@ -178,12 +178,12 @@ class UserRepository:
         try:
             # 존재 여부만 확인 -> 가장 가벼운 형태
             result = await db.execute(
-                select(User.id).where(User.email == email).limit(1)
+                select(User).where(User.email == email)
             )
-            exists = result.scalar() is not None
+            user = result.scalar_one_or_none()
 
-            logger.info(f"이메일 존재 여부 확인: {email} -> {exists}")
-            return exists
+            logger.info(f"이메일 존재 여부 확인: {email} -> {user}")
+            return user is not None
 
         except Exception as e:
             await db.rollback()
