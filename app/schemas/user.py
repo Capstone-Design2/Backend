@@ -46,7 +46,7 @@ class UserResponse(BaseModel):
     """
     사용자 정보 응답 스키마
     """
-    id: int = Field(..., description="사용자 ID")
+    user_id: int = Field(..., description="사용자 ID")
     name: str = Field(..., description="사용자명")
     email: str = Field(..., description="이메일 주소")
     created_at: Optional[datetime] = Field(None, description="생성일시")
