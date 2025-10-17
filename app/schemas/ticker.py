@@ -19,7 +19,8 @@ class TickerResponse(BaseModel):
 class TickerSyncRequest(BaseModel):
     directory: Optional[str] = Field(
         default=None,
-        description="*.mst.zip 파일들이 모여있는 로컬 디렉터리 경로",
+        example="/path/to/your/project/mnt/data",
+        description="MST 파일들이 있는 디렉터리 경로 (기본: /mnt/data)",
     )
 
 class TickerSyncResponse(BaseModel):
