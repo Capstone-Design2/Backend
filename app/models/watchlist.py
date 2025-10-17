@@ -10,6 +10,9 @@ class Watchlist(BaseModel, table=True):
     """
 
     __tablename__ = "watchlists"
+    __table_args__ = (
+        UniqueConstraint("user_id", "name", name="uq_watchlist_user_name"),
+    )
 
     watchlist_id: Optional[int] = Field(
         default=None,
@@ -30,10 +33,6 @@ class Watchlist(BaseModel, table=True):
         description="워치리스트 이름",
     )
 
-    __table_args__ = (
-        UniqueConstraint("user_id", "name", name="uq_watchlist_user_name"),
-    )
-
 
 class WatchlistItem(BaseModel, table=True):
     """
@@ -41,6 +40,9 @@ class WatchlistItem(BaseModel, table=True):
     """
 
     __tablename__ = "watchlist_items"
+    __table_args__ = (
+        UniqueConstraint("watchlist_id", "ticker_id", name="uq_watchlistitem_pair"),
+    )
 
     item_id: Optional[int] = Field(
         default=None,
@@ -61,6 +63,4 @@ class WatchlistItem(BaseModel, table=True):
         description="종목 ID",
     )
 
-    __table_args__ = (
-        UniqueConstraint("watchlist_id", "ticker_id", name="uq_watchlistitem_pair"),
-    )
+    

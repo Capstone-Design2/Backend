@@ -1,9 +1,11 @@
 from datetime import date, datetime, timezone
 from enum import Enum
 from typing import Optional
+from decimal import Decimal
 
-from sqlalchemy import Column
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import Column,CheckConstraint, UniqueConstraint
+from sqlalchemy.dialects.mysql import JSON as MYSQL_JSON
+from sqlalchemy.dialects.mysql import DATETIME as MYSQL_DATETIME
 from sqlalchemy.types import Numeric
 from sqlmodel import Field
 from app.models.base import BaseModel
@@ -22,6 +24,10 @@ class BacktestJob(BaseModel, table=True):
     """
 
     __tablename__ = "backtest_jobs"
+    __table_args__ = ( CheckConstraint("start_date <= end_date", name="ck_btjob_date_range"), 
+        # 자주 쓰는 필터에 맞춰 인덱스(선택) 
+        # Index("ix_btjob_user_status", "user_id", "status"), 
+    )
 
     job_id: Optional[int] = Field(
         default=None,
@@ -71,7 +77,9 @@ class BacktestJob(BaseModel, table=True):
 
     completed_at: Optional[datetime] = Field(
         default=None,
+        primary_key=True,
         description="완료 시각(UTC)",
+        sa_column=Column(MYSQL_DATETIME(fsp=6)),
     )
 
 
@@ -82,6 +90,9 @@ class BacktestResult(BaseModel, table=True):
     """
 
     __tablename__ = "backtest_results"
+    __table_args__ = (
+        UniqueConstraint("job_id", name="uq_btres_job"),
+    )
 
     result_id: Optional[int] = Field(
         default=None,
@@ -93,36 +104,37 @@ class BacktestResult(BaseModel, table=True):
     job_id: int = Field(
         foreign_key="backtest_jobs.job_id",
         nullable=False,
-        description="원천 잡 ID (유일)",
-        sa_column_kwargs={"unique": True},
+        description="원천 잡 ID",
     )
 
-    cagr: Optional[float] = Field(
+    cagr: Optional[Decimal] = Field(
         default=None,
-        sa_column=Column(Numeric(12, 6)),
+        sa_column=Column(Numeric(12, 6, asdecimal=True)),
         description="연평균 수익률",
     )
 
-    sharpe: Optional[float] = Field(
+    sharpe: Optional[Decimal] = Field(
         default=None,
-        sa_column=Column(Numeric(12, 6)),
+        sa_column=Column(Numeric(12, 6, asdecimal=True)),
         description="샤프지수",
     )
 
-    max_drawdown: Optional[float] = Field(
+    max_drawdown: Optional[Decimal] = Field(
         default=None,
-        sa_column=Column(Numeric(12, 6)),
+        sa_column=Column(Numeric(12, 6, asdecimal=True)),
         description="최대 낙폭",
     )
 
     kpi: dict = Field(
         default_factory=dict,
         description="기타 성과지표(JSON)",
-        sa_column=Column(JSONB),
+        nullable=False,
+        sa_column=Column(MYSQL_JSON),
     )
 
     equity_curve: list = Field(
         default_factory=list,
         description="자산 곡선 (list of {ts, equity})",
-        sa_column=Column(JSONB),
+        nullable=False,
+        sa_column=Column(MYSQL_JSON),
     )

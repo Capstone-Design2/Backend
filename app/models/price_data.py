@@ -1,8 +1,10 @@
 from datetime import datetime, timezone
-from typing import Optional
 
-from sqlalchemy import Column, Index
-from sqlalchemy.dialects.postgresql import JSONB
+from typing import Optional
+from decimal import Decimal
+
+from sqlalchemy import Column, Index, UniqueConstraint, CheckConstraint,text
+from sqlalchemy.dialects.mysql import DATETIME as MYSQL_DATETIME, BIGINT as MYSQL_BIGINT
 from sqlalchemy.types import Numeric
 from sqlmodel import Field
 from app.models.base import BaseModel
@@ -16,6 +18,12 @@ class PriceData(BaseModel, table=True):
     """
 
     __tablename__ = "price_data"
+    __table_args__ = (
+        UniqueConstraint("ticker_id", "timestamp", "timeframe", "source",
+                        name="uq_price_ticker_ts_tf_source"),
+        CheckConstraint("timeframe IN ('1D','1h','30m','15m','5m','1m')",
+                        name="ck_price_timeframe"),  
+    )
 
     price_id: Optional[int] = Field(
         default=None,
@@ -31,38 +39,40 @@ class PriceData(BaseModel, table=True):
     )
 
     timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None),
         nullable=False,
         description="캔들 시각(UTC)",
+        sa_column=Column(MYSQL_DATETIME(fsp=6)),
     )
 
-    open: Optional[float] = Field(
+    open: Optional[Decimal] = Field(
         default=None,
-        sa_column=Column(Numeric(20, 8)),
+        sa_column=Column(Numeric(20, 8, asdecimal=True)),
         description="시가",
     )
 
-    high: Optional[float] = Field(
+    high: Optional[Decimal] = Field(
         default=None,
-        sa_column=Column(Numeric(20, 8)),
+        sa_column=Column(Numeric(20, 8, asdecimal=True)),
         description="고가",
     )
 
-    low: Optional[float] = Field(
+    low: Optional[Decimal] = Field(
         default=None,
-        sa_column=Column(Numeric(20, 8)),
+        sa_column=Column(Numeric(20, 8, asdecimal=True)),
         description="저가",
     )
 
-    close: Optional[float] = Field(
+    close: Optional[Decimal] = Field(
         default=None,
-        sa_column=Column(Numeric(20, 8)),
+        sa_column=Column(Numeric(20, 8, asdecimal=True)),
         description="종가",
     )
 
     volume: Optional[int] = Field(
         default=None,
         description="거래량",
+        sa_column=Column(MYSQL_BIGINT(unsigned=True))
     )
 
     timeframe: str = Field(
@@ -72,7 +82,7 @@ class PriceData(BaseModel, table=True):
     )
 
     source: str = Field(
-        default="YFINANCE",
+        default="KIS",
         max_length=20,
         description="수집 소스 (YFINANCE/KIS)",
     )
@@ -80,15 +90,14 @@ class PriceData(BaseModel, table=True):
     is_adjusted: bool = Field(
         default=False,
         description="배당/분할 조정 여부",
+        sa_column_kwargs={"server_default": text("0")}
     )
 
 
-# SQLAlchemy-level index (optional but recommended)
+# 조회 최적화용 인덱스
 Index(
-    "uq_price_unique",
+    "ix_price_ticker_tf_ts",
     PriceData.__table__.c.ticker_id,
-    PriceData.__table__.c.timestamp,
     PriceData.__table__.c.timeframe,
-    PriceData.__table__.c.source,
-    unique=True,
+    PriceData.__table__.c.timestamp,
 )

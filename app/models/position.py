@@ -1,5 +1,6 @@
 from typing import Optional
-from sqlalchemy import Column, UniqueConstraint
+from decimal import Decimal
+from sqlalchemy import Column, UniqueConstraint, CheckConstraint
 from sqlalchemy.types import Numeric
 from sqlmodel import Field
 from app.models.base import BaseModel
@@ -11,6 +12,11 @@ class Position(BaseModel, table=True):
     """
 
     __tablename__ = "positions"
+    __table_args__ = (
+        UniqueConstraint("account_id", "ticker_id", name="uq_position_account_ticker"),
+        CheckConstraint("quantity > 0", name="ck_pos_quantity_positive"),
+        CheckConstraint("average_buy_price > 0", name="ck_pos_avg_buy_price_positive"),
+    )
 
     position_id: Optional[int] = Field(
         default=None,
@@ -31,18 +37,14 @@ class Position(BaseModel, table=True):
         description="종목 ID",
     )
 
-    quantity: float = Field(
-        sa_column=Column(Numeric(20, 8)),
+    quantity: Decimal = Field(
+        sa_column=Column(Numeric(20, 8, asdecimal=True)),
         nullable=False,
         description="현재 수량",
     )
 
-    average_buy_price: float = Field(
-        sa_column=Column(Numeric(20, 8)),
+    average_buy_price: Decimal = Field(
+        sa_column=Column(Numeric(20, 8, asdecimal=True)),
         nullable=False,
         description="평균 매입 단가",
-    )
-
-    __table_args__ = (
-        UniqueConstraint("account_id", "ticker_id", name="uq_position_account_ticker"),
     )

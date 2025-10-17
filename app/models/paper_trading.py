@@ -1,5 +1,6 @@
 from typing import Optional
-from sqlalchemy import Column, UniqueConstraint
+from decimal import Decimal
+from sqlalchemy import Column, UniqueConstraint, CheckConstraint, text
 from sqlalchemy.types import Numeric
 from sqlmodel import Field
 from app.models.base import BaseModel
@@ -11,6 +12,13 @@ class PaperTradingAccount(BaseModel, table=True):
     """
 
     __tablename__ = "paper_trading_accounts"
+    __table_args__ = (
+        UniqueConstraint("user_id", name="uq_paper_account_user"),
+        # 음수 방지
+        CheckConstraint("initial_balance >= 0", name="ck_pta_initial_balance_nonneg"),
+        CheckConstraint("current_balance >= 0", name="ck_pta_current_balance_nonneg"),
+        CheckConstraint("total_asset_value >= 0", name="ck_pta_total_asset_nonneg"),
+    )
 
     account_id: Optional[int] = Field(
         default=None,
@@ -25,20 +33,23 @@ class PaperTradingAccount(BaseModel, table=True):
         description="소유 사용자",
     )
 
-    initial_balance: float = Field(
-        sa_column=Column(Numeric(20, 8)),
+    initial_balance: Decimal = Field(
+        default = Decimal("0"),
+        sa_column=Column(Numeric(20, 8, asdecimal=True),server_default=text("0")),
         nullable=False,
         description="초기 예수금",
     )
 
-    current_balance: float = Field(
-        sa_column=Column(Numeric(20, 8)),
+    current_balance: Decimal = Field(
+        default = Decimal("0"),
+        sa_column=Column(Numeric(20, 8, asdecimal=True),server_default=text("0")),
         nullable=False,
         description="현재 현금 잔액",
     )
 
-    total_asset_value: float = Field(
-        sa_column=Column(Numeric(20, 8)),
+    total_asset_value: Decimal = Field(
+        default = Decimal("0"),
+        sa_column=Column(Numeric(20, 8, asdecimal=True),server_default=text("0")),
         nullable=False,
         description="총 자산 평가액",
     )
@@ -46,8 +57,5 @@ class PaperTradingAccount(BaseModel, table=True):
     is_active: bool = Field(
         default=False,
         description="활성화 여부(Kill Switch)",
-    )
-
-    __table_args__ = (
-        UniqueConstraint("user_id", name="uq_paper_account_user"),
+        sa_column_kwargs={"server_default": text("0")}
     )
