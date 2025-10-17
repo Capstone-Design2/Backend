@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from sqlalchemy import Column,CheckConstraint
 from sqlalchemy.types import Numeric
-from sqlalchemy.dialects.mysql import DATETIME as MYSQL_DATETIME
+from sqlalchemy import DateTime
 from sqlmodel import Field
 from app.models.base import BaseModel
 
@@ -93,12 +93,12 @@ class Order(BaseModel, table=True):
     submitted_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None),
         nullable=False,
-        sa_column=Column(MYSQL_DATETIME(fsp=6)),
+        sa_column=Column(DateTime(timezone=False)),
         description="주문 접수 시각(UTC)",
     )
 
     completed_at: Optional[datetime] = Field(
         default=None,
-        sa_column=Column(MYSQL_DATETIME(fsp=6)),
+        sa_column=Column(DateTime(timezone=False)),
         description="주문 체결 완료 시각(UTC)",
     )

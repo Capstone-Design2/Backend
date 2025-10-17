@@ -3,8 +3,8 @@ from datetime import datetime, timezone
 from typing import Optional
 from decimal import Decimal
 
-from sqlalchemy import Column, Index, UniqueConstraint, CheckConstraint,text
-from sqlalchemy.dialects.mysql import DATETIME as MYSQL_DATETIME, BIGINT as MYSQL_BIGINT
+from sqlalchemy import Column, Index, UniqueConstraint, CheckConstraint,text, BigInteger
+from sqlalchemy import DateTime
 from sqlalchemy.types import Numeric
 from sqlmodel import Field
 from app.models.base import BaseModel
@@ -42,7 +42,7 @@ class PriceData(BaseModel, table=True):
         default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None),
         nullable=False,
         description="캔들 시각(UTC)",
-        sa_column=Column(MYSQL_DATETIME(fsp=6)),
+        sa_column=Column(DateTime(timezone=False)),
     )
 
     open: Optional[Decimal] = Field(
@@ -72,7 +72,7 @@ class PriceData(BaseModel, table=True):
     volume: Optional[int] = Field(
         default=None,
         description="거래량",
-        sa_column=Column(MYSQL_BIGINT(unsigned=True))
+        sa_column=Column(BigInteger)
     )
 
     timeframe: str = Field(

@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from sqlalchemy import Column,CheckConstraint
 from sqlalchemy.types import Numeric
-from sqlalchemy.dialects.mysql import DATETIME as MYSQL_DATETIME
+from sqlalchemy import DateTime
 from sqlmodel import Field
 from app.models.base import BaseModel
 
@@ -48,6 +48,6 @@ class Execution(BaseModel, table=True):
     exec_time: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None),
         nullable=False,
-        sa_column=Column(MYSQL_DATETIME(fsp=6)),
+        sa_column=Column(DateTime(timezone=False)),
         description="체결 시각(UTC)",
     )

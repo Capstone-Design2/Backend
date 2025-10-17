@@ -1,5 +1,5 @@
 from typing import Optional
-from sqlalchemy.dialects.mysql import JSON as MYSQL_JSON
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy import Column, UniqueConstraint
 from sqlmodel import Field
 from app.models.base import BaseModel
@@ -44,5 +44,5 @@ class Strategy(BaseModel, table=True):
         default_factory=dict,
         nullable=False,
         description="전략 룰 JSON",
-        sa_column=Column(MYSQL_JSON),
+        sa_column=Column(JSONB),
     )
