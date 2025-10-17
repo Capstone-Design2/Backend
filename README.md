@@ -12,8 +12,17 @@ Backend/
 │   ├── models/                 # 데이터베이스 모델 (SQLAlchemy)
 │   │   ├── __init__.py
 │   │   ├── base.py             # Base 클래스 (declarative_base 등)
-│   │   ├── user.py             # 사용자 모델
-│   │   └── tickers.py          # 종목정보 모델
+│   │   ├── backtest.py         # 백테스트 모델
+│   │   ├── execution.py        # 체결 모델
+│   │   ├── order.py            # 주문 모델
+│   │   ├── paper_trading.py    # 모의투자 모델
+│   │   ├── position.py         # 포지션 모델
+│   │   ├── price_data.py       # 시세 데이터 모델
+│   │   ├── strategy.py         # 전략 정보 모델
+│   │   ├── ticker.py           # 종목정보 모델
+│   │   ├── trade.py            # 거래기록 모델
+│   │   ├── user.py             # 사용자 모델 
+│   │   └── watchlist.py        # 관심종목 모델
 │   ├── repositories/           # 데이터 접근 계층 (DB 쿼리 로직)
 │   │   ├── __init__.py
 │   │   └── user_repository.py  # 사용자 CRUD
