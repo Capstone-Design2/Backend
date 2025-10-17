@@ -12,7 +12,8 @@ Backend/
 │   ├── models/                 # 데이터베이스 모델 (SQLAlchemy)
 │   │   ├── __init__.py
 │   │   ├── base.py             # Base 클래스 (declarative_base 등)
-│   │   └── user.py             # 사용자 모델
+│   │   ├── user.py             # 사용자 모델
+│   │   └── tickers.py          # 종목정보 모델
 │   ├── repositories/           # 데이터 접근 계층 (DB 쿼리 로직)
 │   │   ├── __init__.py
 │   │   └── user_repository.py  # 사용자 CRUD
