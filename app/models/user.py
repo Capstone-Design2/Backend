@@ -29,7 +29,7 @@ class User(BaseModel, table=True):
         max_length=100,
         nullable=False,
         description="로그인 이메일",
-        sa_column_kwargs={"unique": True},
+        unique=True,
     )
 
     password_hash: str = Field(

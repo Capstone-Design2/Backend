@@ -1,9 +1,11 @@
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
+from decimal import Decimal
 
-from sqlalchemy import Column
+from sqlalchemy import Column,CheckConstraint
 from sqlalchemy.types import Numeric
+from sqlalchemy.dialects.mysql import DATETIME as MYSQL_DATETIME
 from sqlmodel import Field
 from app.models.base import BaseModel
 
@@ -32,6 +34,9 @@ class Order(BaseModel, table=True):
     """
 
     __tablename__ = "orders"
+    __table_args__ = (
+        CheckConstraint("quantity > 0", name="ck_order_quantity_positive"),
+    )
 
     order_id: Optional[int] = Field(
         default=None,
@@ -68,15 +73,15 @@ class Order(BaseModel, table=True):
         description="매수/매도",
     )
 
-    quantity: float = Field(
-        sa_column=Column(Numeric(20, 8)),
+    quantity: Decimal = Field(
+        sa_column=Column(Numeric(20, 8, asdecimal=True)),
         nullable=False,
         description="주문 수량",
     )
 
-    limit_price: Optional[float] = Field(
+    limit_price: Optional[Decimal] = Field(
         default=None,
-        sa_column=Column(Numeric(20, 8)),
+        sa_column=Column(Numeric(20, 8, asdecimal=True)),
         description="지정가",
     )
 
@@ -86,11 +91,14 @@ class Order(BaseModel, table=True):
     )
 
     submitted_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None),
+        nullable=False,
+        sa_column=Column(MYSQL_DATETIME(fsp=6)),
         description="주문 접수 시각(UTC)",
     )
 
     completed_at: Optional[datetime] = Field(
         default=None,
+        sa_column=Column(MYSQL_DATETIME(fsp=6)),
         description="주문 체결 완료 시각(UTC)",
     )

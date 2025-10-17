@@ -1,5 +1,6 @@
 from typing import Optional
 from sqlmodel import Field
+from sqlalchemy import UniqueConstraint
 from app.models.base import BaseModel
 
 
@@ -10,6 +11,8 @@ class Ticker(BaseModel, table=True):
     """
 
     __tablename__ = "tickers"
+    __table_args__ = (UniqueConstraint("market", "symbol", name="unique_market_symbol"),)
+
 
     ticker_id: Optional[int] = Field(
         default=None,
@@ -22,13 +25,14 @@ class Ticker(BaseModel, table=True):
         max_length=20,
         nullable=False,
         description="심볼 (ex: 005930.KS, AAPL)",
-        sa_column_kwargs={"unique": True},
+        index=True
     )
 
     kis_code: Optional[str] = Field(
         default=None,
         max_length=20,
         description="KIS 종목코드 (ex: 005930)",
+        index=True
     )
 
     company_name: Optional[str] = Field(
@@ -45,7 +49,7 @@ class Ticker(BaseModel, table=True):
 
     currency: str = Field(
         default="KRW",
-        max_length=10,
+        max_length=4,
         description="거래 통화",
     )
 
@@ -53,4 +57,21 @@ class Ticker(BaseModel, table=True):
         default=None,
         max_length=24,
         description="국제 증권 식별 코드(ISIN)",
+        unique=True
     )
+    
+    def to_dict(self) -> dict:
+        return{
+            "ticker_id": self.ticker_id,
+            "symbol": self.symbol,
+            "kis_code": self.kis_code,
+            "company_name": self.company_name,
+            "market": self.market,
+            "currency": self.currency,
+            "isin": self.isin,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at
+        }
+
+    def __repr__(self) -> str:
+        return f"<Ticker(id={self.ticker_id}, symbol='{self.symbol}')>"

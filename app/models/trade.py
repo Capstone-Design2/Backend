@@ -1,11 +1,18 @@
 from datetime import datetime, timezone
 from typing import Optional
+from decimal import Decimal
+from enum import Enum
 
-from sqlalchemy import Column
+from sqlalchemy import Column,CheckConstraint
 from sqlalchemy.types import Numeric
+from sqlalchemy.dialects.mysql import DATETIME as MYSQL_DATETIME
 from sqlmodel import Field
 from app.models.base import BaseModel
 
+
+class TradeSide(str, Enum):
+    BUY = "BUY"
+    SELL = "SELL"
 
 class Trade(BaseModel, table=True):
     """
@@ -14,6 +21,10 @@ class Trade(BaseModel, table=True):
     """
 
     __tablename__ = "trades"
+    __table_args__ = (
+        CheckConstraint("quantity > 0", name="ck_trade_quantity_positive"),
+        CheckConstraint("price > 0", name="ck_trade_price_positive"),
+    )
 
     trade_id: Optional[int] = Field(
         default=None,
@@ -54,26 +65,26 @@ class Trade(BaseModel, table=True):
         description="종목 ID",
     )
 
-    side: str = Field(
-        max_length=10,
+    side: TradeSide = Field(
         nullable=False,
-        description="BUY / SELL",
+        description="매도/매수 구분",
     )
 
-    quantity: float = Field(
-        sa_column=Column(Numeric(20, 8)),
+    quantity: Decimal = Field(
+        sa_column=Column(Numeric(20, 8, asdecimal=True)),
         nullable=False,
         description="거래 수량",
     )
 
-    price: float = Field(
-        sa_column=Column(Numeric(20, 8)),
+    price: Decimal = Field(
+        sa_column=Column(Numeric(20, 8, asdecimal=True)),
         nullable=False,
         description="거래 단가",
     )
 
     transaction_time: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None),
         nullable=False,
+        sa_column=Column(MYSQL_DATETIME(fsp=6)),
         description="거래 시각(UTC)",
     )
