@@ -3,16 +3,11 @@ from sqlmodel import Field
 from sqlalchemy import UniqueConstraint
 from app.models.base import BaseModel
 
-
 class Ticker(BaseModel, table=True):
-    """
-    종목 메타 정보
-    - KIS 코드/ISIN 포함
-    """
-
     __tablename__ = "tickers"
-    __table_args__ = (UniqueConstraint("market", "symbol", name="unique_market_symbol"),)
-
+    __table_args__ = (
+        UniqueConstraint("market", "symbol", name="uq_tickers_market_symbol"),
+    )
 
     ticker_id: Optional[int] = Field(
         default=None,
@@ -25,14 +20,14 @@ class Ticker(BaseModel, table=True):
         max_length=20,
         nullable=False,
         description="심볼 (ex: 005930.KS, AAPL)",
-        index=True
+        index=True,
     )
 
     kis_code: Optional[str] = Field(
         default=None,
         max_length=20,
         description="KIS 종목코드 (ex: 005930)",
-        index=True
+        index=True,
     )
 
     company_name: Optional[str] = Field(
@@ -41,10 +36,10 @@ class Ticker(BaseModel, table=True):
         description="기업/종목명",
     )
 
-    market: Optional[str] = Field(
-        default=None,
+    market: str = Field(
         max_length=20,
-        description="시장 (KOSPI/NASDAQ/ETF 등)",
+        nullable=False,
+        description="시장 (KOSPI/KOSDAQ/KONEX/ETF 등)",
     )
 
     currency: str = Field(
@@ -57,11 +52,12 @@ class Ticker(BaseModel, table=True):
         default=None,
         max_length=24,
         description="국제 증권 식별 코드(ISIN)",
-        unique=True
+        index=True,
+        unique=True,
     )
-    
+
     def to_dict(self) -> dict:
-        return{
+        return {
             "ticker_id": self.ticker_id,
             "symbol": self.symbol,
             "kis_code": self.kis_code,

@@ -8,9 +8,14 @@ API 엔드포인트들을 정의합니다.
 from fastapi import APIRouter
 
 from .user import router as user_router
+from .ticker import router as ticker_router
+from .auth import router as auth_router
+
 
 __all__ = [
     "user_router",
+    "ticker_router",
+    "auth_router",
 ]
 
 
