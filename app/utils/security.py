@@ -1,5 +1,6 @@
 import os
 from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, Optional
 from jose import jwt, JWTError
 from passlib.context import CryptContext
 
@@ -33,7 +34,7 @@ def create_refresh_token(sub: str):
     return _create_token({"sub": sub, "scope": "refresh"},
                          timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
 
-def decode_token(token: str) -> dict | None:
+def decode_token(token: str) -> Optional[Dict[str, Any]]:
     try:
         return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
     except JWTError:

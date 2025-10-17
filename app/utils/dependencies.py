@@ -9,7 +9,7 @@ from app.services.user import UserService
 from app.services.auth import AuthService
 from app.services.ticker import TickerService
 from app.utils.security import decode_token
-from app.utils.kis_auth import get_kis_auth_manager, KISAuthManager
+from app.services.kis_auth import get_kis_auth_manager, KISAuthManager
 
 
 # Swagger에서 Authorize → 토큰만 입력해도 Bearer 자동으로 붙음
@@ -43,16 +43,21 @@ async def get_current_user(
             detail="Invalid or expired token"
         )
 
-    email = payload.get("sub")
+    sub = payload.get("sub")
+    # ★ 타입 내로잉: str 타입인지 검증해서 None/Unknown 제거
+    if not isinstance(sub, str) or not sub:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token payload (sub)",
+        )
+    email: str = sub 
+
     repo = UserRepository()
     user = await repo.get_by_email(db, email)
-    
+
     if not user:
-        raise HTTPException(
-            status_code=401, 
-            detail="User not found"
-        )
-        
+        raise HTTPException(status_code=401, detail="User not found")
+
     return user
 
 async def get_ticker_service(

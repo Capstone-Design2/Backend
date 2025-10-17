@@ -18,9 +18,7 @@ router = get_router("ticker")
     status_code=status.HTTP_200_OK,
     summary="티커 파일 동기화 (*.mst.zip)",
     description="""
-    로컬 디렉터리 내 *.mst.zip(KOSPI/KOSDAQ/KONEX/NXT/ELW)을 파싱해 ticker 테이블로 업서트합니다.
-    - 파일명 기준 시장 매핑: kospi_code.mst.zip → KOSPI, kosdaq_code.mst.zip → KOSDAQ, konex_code.mst.zip → KONEX 등
-    - 업서트 키: (ticker_code, market)
+    로컬 디렉터리 내 종목정보 파일을 파싱해 ticker 테이블로 upsert합니다.
     """,
 )
 

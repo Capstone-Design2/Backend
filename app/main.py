@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 
 from app.database import init_db
 from app.routers import user_router
-from app.routers import user_router, ticker_router
+from app.routers import user_router, ticker_router, price_router
 from app.routers.auth import router as auth_router  # ✅ 추가
 from app.utils.logger import sample_logger
 
@@ -104,6 +104,7 @@ app.add_middleware(
 app.include_router(auth_router)  # JWT 관련 라우터 등록
 app.include_router(user_router)  # 사용자 CRUD 라우터 등록
 app.include_router(ticker_router)  # ticker 라우터 등록
+app.include_router(price_router)  # price 라우터 등록
 
 # ----------------------------------------------------------------------
 # 기본 라우트
