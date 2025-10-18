@@ -1,6 +1,6 @@
 from __future__ import annotations
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 import re
 
 from sqlalchemy.dialects.postgresql import insert
@@ -179,4 +179,35 @@ class TickerService:
         )
         rows = (await db.execute(stmt)).all()
         return {kis: tid for kis, tid in rows if kis and SIX_DIGIT.fullmatch(kis)}
+    
+    async def resolve_one(
+        self, db, *, kis_code: Optional[str] = None, symbol: Optional[str] = None
+    ) -> Tuple[int, str]:
+        """
+        단일 종목 식별자 → (ticker_id, kis_code) 반환
+        - kis_code 우선. 없으면 symbol로 조회.
+        - 둘 다 없으면 ValueError
+        - 못 찾으면 LookupError
+        """
+        if not kis_code and not symbol:
+            raise ValueError("kis_code 또는 symbol 중 하나는 필수입니다.")
+
+        if kis_code:
+            stmt = select(
+                Ticker.__table__.c.ticker_id,
+                Ticker.__table__.c.kis_code,
+            ).where(Ticker.__table__.c.kis_code == kis_code)
+        else:
+            stmt = select(
+                Ticker.__table__.c.ticker_id,
+                Ticker.__table__.c.kis_code,
+            ).where(Ticker.__table__.c.symbol == symbol)
+
+        row = (await db.execute(stmt)).first()
+        if not row:
+            raise LookupError(f"해당 종목을 찾을 수 없습니다. (kis_code={kis_code}, symbol={symbol})")
+        tid, kcode = row
+        if not kcode or len(kcode) != 6:
+            raise LookupError(f"해당 종목은 유효한 6자리 kis_code가 없습니다. (symbol={symbol})")
+        return tid, kcode
         

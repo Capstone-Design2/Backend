@@ -1,10 +1,115 @@
+# app/services/kis_prices.py
+from __future__ import annotations
+
+import asyncio, time, json, random
+from collections import deque
 from enum import IntEnum
 from typing import List, Dict, Literal, Optional
+from datetime import datetime, timedelta, timezone
+
 import httpx
-from app.services.kis_auth import get_kis_auth_manager, KIS_API_BASE_URL, KIS_APP_KEY, KIS_APP_SECRET
+from app.services.kis_auth import (
+    get_kis_auth_manager,
+    KIS_API_BASE_URL,   # 예: "https://openapi.koreainvestment.com:9443/uapi/domestic-stock/v1"
+    KIS_APP_KEY,
+    KIS_APP_SECRET,
+)
 
-Timeframe = Literal["1D", "1h", "30m", "15m", "5m", "1m"]
+# =========================
+# 레이트리밋/재시도 설정
+# =========================
+KIS_MAX_RPS = 5                    # 초당 최대 호출 수 (보수적으로 시작)
+KIS_MAX_CONCURRENCY = 2            # 동시 요청 제한
+KIS_RETRY_MAX = 4                  # 재시도 횟수
+KIS_BACKOFF_BASE = 0.4             # 지수 백오프 base (초)
+KIS_BACKOFF_JITTER = (0.05, 0.25)  # 지터(랜덤) 범위
 
+# =========================
+# 공통 유틸
+# =========================
+def _extract_time(it: Dict) -> Optional[str]:
+    return (
+        (it.get("stck_cntg_hour") or it.get("stck_trd_tm") or it.get("trd_tm") or it.get("time"))
+        and str(it.get("stck_cntg_hour") or it.get("stck_trd_tm") or it.get("trd_tm") or it.get("time"))
+    )
+
+def _min_hhmmss(items: List[Dict]) -> Optional[str]:
+    times = [t for t in (_extract_time(x) for x in items) if t and len(t) == 6 and t.isdigit()]
+    return min(times) if times else None
+
+def _dec_second(hhmmss: str) -> str:
+    h = int(hhmmss[0:2]); m = int(hhmmss[2:4]); s = int(hhmmss[4:6])
+    total = max(0, h*3600 + m*60 + s - 1)
+    hh = total // 3600; mm = (total % 3600) // 60; ss = total % 60
+    return f"{hh:02d}{mm:02d}{ss:02d}"
+
+# =========================
+# 시각/도메인 유틸
+# =========================
+KST = timezone(timedelta(hours=9))
+API_PREFIX = "/uapi/domestic-stock/v1"
+
+def _hhmmss(dt: datetime) -> str:
+    return dt.strftime("%H%M%S")
+
+def _today_kst_range(now: Optional[datetime] = None) -> tuple[str, str]:
+    """
+    KST 기준 장시작~장마감(09:00:00~15:30:00)
+    - 장전: (09:00:00, 09:00:00)
+    - 장중: (09:00:00, now)
+    - 장후: (09:00:00, 15:30:00)
+    """
+    n = now.astimezone(KST) if now else datetime.now(KST)
+    start = n.replace(hour=9, minute=0, second=0, microsecond=0)
+    end_close = n.replace(hour=15, minute=30, second=0, microsecond=0)
+    if n < start:
+        return _hhmmss(start), _hhmmss(start)
+    elif n <= end_close:
+        return _hhmmss(start), _hhmmss(n)
+    else:
+        return _hhmmss(start), _hhmmss(end_close)
+
+def _base_has_prefix(base_url: str) -> bool:
+    return base_url.rstrip("/").endswith(API_PREFIX)
+
+def _normalize_path(base_url: str, leaf: str) -> str:
+    leaf = "/" + leaf.lstrip("/")
+    return leaf if _base_has_prefix(base_url) else API_PREFIX + leaf
+
+# =========================
+# 간단 레이트리미터
+# =========================
+class _RateLimiter:
+    def __init__(self, rps: int, concurrency: int):
+        self.rps = max(1, rps)
+        self.window = deque()
+        self.lock = asyncio.Semaphore(max(1, concurrency))
+
+    async def acquire(self):
+        await self.lock.acquire()
+        try:
+            while True:
+                now = time.monotonic()
+                while self.window and now - self.window[0] > 1.0:
+                    self.window.popleft()
+                if len(self.window) < self.rps:
+                    self.window.append(now)
+                    return
+                sleep_for = 1.0 - (now - self.window[0])
+                await asyncio.sleep(max(0.01, sleep_for))
+        finally:
+            self.lock.release()
+
+# =========================
+# TR ID (실전/모의에 맞게 교체)
+# =========================
+TRID_DAILY_REAL        = "FHKST03010100"  # 기간별시세(일/주/월/년)
+TRID_INTRADAY_TODAY    = "FHKST03010200"  # 당일 분봉
+TRID_INTRADAY_BY_DATE  = "FHKST03010230"  # 일별 분봉 조회
+
+# =========================
+# 분봉 단위 Enum
+# =========================
 class MinuteUnit(IntEnum):
     m1 = 1
     m5 = 5
@@ -12,6 +117,9 @@ class MinuteUnit(IntEnum):
     m30 = 30
     m60 = 60
 
+# =========================
+# 메인 래퍼
+# =========================
 class KISPrices:
     """
     KIS 국내주식 시세 API 래퍼 (일/분봉)
@@ -19,8 +127,10 @@ class KISPrices:
     def __init__(self) -> None:
         self._auth = get_kis_auth_manager()
         self._base_url = KIS_API_BASE_URL.rstrip("/")
+        self._limiter = _RateLimiter(KIS_MAX_RPS, KIS_MAX_CONCURRENCY)
+        self._client_obj: Optional[httpx.AsyncClient] = None
 
-    async def _headers(self) -> dict:
+    async def _headers(self, tr_id: str) -> dict:
         token = await self._auth.get_access_token()
         return {
             "Authorization": f"Bearer {token}",
@@ -29,124 +139,229 @@ class KISPrices:
             "Accept": "application/json",
             "Content-Type": "application/json; charset=utf-8",
             "custtype": "P",
-            "tr_id": "FHKST03010100",
+            "tr_id": tr_id,
         }
 
-    async def _client(self) -> httpx.AsyncClient:
-        return httpx.AsyncClient(base_url=self._base_url, headers=await self._headers(), timeout=15)
+    async def _client(self, tr_id: str) -> httpx.AsyncClient:
+        # AsyncClient 재사용 + TR ID 갱신
+        if self._client_obj is None or self._client_obj.is_closed:
+            self._client_obj = httpx.AsyncClient(
+                base_url=self._base_url,
+                headers=await self._headers(tr_id),
+                timeout=15,
+            )
+        else:
+            self._client_obj.headers.update(await self._headers(tr_id))
+        return self._client_obj
 
-    # ---- 1) 일/주/월/년 봉 ----
+    async def aclose(self):
+        if self._client_obj and not self._client_obj.is_closed:
+            await self._client_obj.aclose()
+
+    async def _get(self, tr_id: str, leaf_path: str, params: dict) -> dict:
+        """
+        안전 GET
+        """
+        path = _normalize_path(self._base_url, leaf_path)
+        client = await self._client(tr_id)
+
+        last_err = None
+        for attempt in range(1, KIS_RETRY_MAX + 1):
+            await self._limiter.acquire()
+
+            resp = await client.get(path, params=params)
+            text = resp.text
+            status = resp.status_code
+
+            if 200 <= status < 300:
+                try:
+                    j = resp.json()
+                except Exception:
+                    return {"raw": text}
+
+                rt_cd = (j.get("rt_cd") or j.get("rtcd") or "").strip()
+                if rt_cd in ("", "0"):
+                    return j
+
+                msg_cd = (j.get("msg_cd") or j.get("msgcd") or "").strip()
+                if msg_cd in {"EGW00201", "EGW00202"}:
+                    backoff = (KIS_BACKOFF_BASE * (2 ** (attempt - 1))) + random.uniform(*KIS_BACKOFF_JITTER)
+                    await asyncio.sleep(backoff)
+                    last_err = (status, msg_cd, text)
+                    continue
+
+                raise RuntimeError({
+                    "where": "KIS_GET(rt_cd!=0)",
+                    "status": status,
+                    "msg_cd": msg_cd,
+                    "text": text[:600],
+                    "url": str(resp.request.url),
+                    "params": params,
+                })
+
+            try:
+                j = json.loads(text)
+                msg_cd = (j.get("msg_cd") or "").strip()
+            except Exception:
+                j = None
+                msg_cd = ""
+
+            if msg_cd in {"EGW00201", "EGW00202"}:
+                backoff = (KIS_BACKOFF_BASE * (2 ** (attempt - 1))) + random.uniform(*KIS_BACKOFF_JITTER)
+                await asyncio.sleep(backoff)
+                last_err = (status, msg_cd, text)
+                continue
+
+            resp.raise_for_status()
+
+        # 재시도 모두 실패
+        raise RuntimeError({
+            "where": "KIS_GET(retry_exhausted)",
+            "last_error": last_err,
+            "url": f"{self._base_url}{path}",
+            "params": params,
+        })
+
+    # ========== 1) 일/주/월/년 ==========
     async def get_period_candles(
         self,
         kis_code: str,
         start_date: str,  # "YYYYMMDD"
         end_date: str,    # "YYYYMMDD"
         period: Literal["D","W","M","Y"] = "D",
+        adjusted: bool = False,
     ) -> List[Dict]:
         """
-        국내주식기간별시세(일_주_월_년)
+        국내주식기간별시세(일/주/월/년)
         """
-        url = "/quotations/inquire-daily-itemchartprice" 
-        
         params = {
-            "FID_COND_MRKT_DIV_CODE": "J",
-            "FID_INPUT_ISCD": kis_code,
-            "FID_INPUT_DATE_1": start_date,
-            "FID_INPUT_DATE_2": end_date,
-            "FID_PERIOD_DIV_CODE": period,  # D/W/M/Y
-            "FID_ORG_ADJ_PRC": "0",         # 0:비조정, 1:조정
+            "fid_cond_mrkt_div_code": "J",
+            "fid_input_iscd": kis_code,          # 6자리
+            "fid_input_date_1": start_date,      # YYYYMMDD
+            "fid_input_date_2": end_date,        # YYYYMMDD
+            "fid_period_div_code": period,       # D/W/M/Y
+            "fid_org_adj_prc": "1" if adjusted else "0",
         }
-        async with await self._client() as client:
-            r = await client.get(url, params=params)
-            r.raise_for_status()
-            j = r.json()
+        j = await self._get(TRID_DAILY_REAL, "quotations/inquire-daily-itemchartprice", params)
 
         rows = j.get("output") or j.get("output2") or []
         out: List[Dict] = []
         for it in rows:
             out.append({
                 "date":   it.get("stck_bsop_date") or it.get("trd_dd"),
-                "open":   it.get("stck_oprc") or it.get("opnprc"),
-                "high":   it.get("stck_hgpr") or it.get("hgpr"),
-                "low":    it.get("stck_lwpr") or it.get("lwpr"),
-                "close":  it.get("stck_clpr") or it.get("clpr"),
-                "volume": it.get("acml_tr_pbmn") or it.get("tvol"),
+                "open":   it.get("stck_oprc")      or it.get("opnprc"),
+                "high":   it.get("stck_hgpr")      or it.get("hgpr"),
+                "low":    it.get("stck_lwpr")      or it.get("lwpr"),
+                "close":  it.get("stck_clpr")      or it.get("clpr"),
+                # 거래량 우선 → 없으면 다른 필드로 폴백
+                "volume": it.get("acml_vol") or it.get("acml_tr_vol") or it.get("tvol") or it.get("acml_tr_pbmn"),
             })
         return out
 
-    # ---- 2) 과거 분봉 ----
+    # ========== 2) 과거 분봉(일자별) ==========
     async def get_intraday_by_date(
-        self,
-        kis_code: str,
-        date: str,  # "YYYYMMDD"
-        time_end: str = "153000",          # "HHMMSS" → 이 시각까지 역방향 최대 30개
-        unit: Optional[int | MinuteUnit] = 1,  # 1/5/15/30/60 (있을 때만 전송)
+    self,
+    kis_code: str,
+    date: str,               # "YYYYMMDD"
     ) -> List[Dict]:
         """
-        주식일별분봉조회
+        주식일별분봉조회: date일의 1분봉 전량 수집(30건 페이징)
         """
-        url = "/quotations/inquire-time-dailychartprice"
-        unit_val: Optional[int] = None if unit is None else int(unit)
+        async def _page(anchor_hms: str) -> List[Dict]:
+            params = {
+                "fid_cond_mrkt_div_code": "J",
+                "fid_input_iscd": kis_code,   # 6자리
+                "fid_input_date_1": date,     # YYYYMMDD
+                "fid_input_hour_1": anchor_hms,  # HHMMSS (끝시각 기준 30건)
+                "fid_pw_data_incu_yn": "Y",     # 과거 데이터 포함
+            }
+            j = await self._get(TRID_INTRADAY_BY_DATE, "quotations/inquire-time-dailychartprice", params)
+            # 다양한 계정/버전 대응: output, output1, output2 중 배열 골라내기
+            rows = (j.get("output2") or j.get("output1") or j.get("output") or [])
+            return rows if isinstance(rows, list) else []
 
-        params = {
-            "fid_cond_mrkt_div_code": "J",
-            "fid_input_iscd": kis_code,
-            "fid_input_date_1": date,
-            "fid_input_hour_1": str(time_end),  # HHMMSS
-        }
-        
-        if unit_val is not None:
-            params["fid_input_hour_2"] = f"{unit_val:02d}"  # 01/05/15/30/60
+        # 1) 15:30부터 시작해서 09:00까지 당기기
+        all_rows: List[Dict] = []
+        anchor = "153000"
+        while True:
+            items = await _page(anchor)
+            if not items:
+                break
+            all_rows.extend(items)
+            # 가장 이른 체결시각 찾고 1초 줄여서 다음 페이지 요청
+            times = [str(it.get("stck_cntg_hour") or it.get("stck_trd_tm") or it.get("trd_tm") or it.get("time")) for it in items]
+            times = [t for t in times if t and len(t) == 6 and t.isdigit()]
+            earliest = min(times) if times else None
+            if not earliest or earliest <= "090000":
+                break
+            h = int(earliest[0:2]); m = int(earliest[2:4]); s = int(earliest[4:6])
+            total = max(0, h*3600 + m*60 + s - 1)
+            h = total // 3600; m = (total % 3600) // 60; s = total % 60
+            anchor = f"{h:02d}{m:02d}{s:02d}"
 
-        async with await self._client() as client:
-            r = await client.get(url, params=params)
-            r.raise_for_status()
-            j = r.json()
-
-        rows = j.get("output") or []
+        # 2) 정규화
         out: List[Dict] = []
-        for it in rows:
+        for it in all_rows:
             out.append({
                 "date":   it.get("stck_bsop_date") or date,
-                "time":   it.get("stck_trd_tm") or it.get("trd_tm"),
-                "open":   it.get("stck_oprc") or it.get("opnprc"),
-                "high":   it.get("stck_hgpr") or it.get("hgpr"),
-                "low":    it.get("stck_lwpr") or it.get("lwpr"),
-                "close":  it.get("stck_prpr") or it.get("clpr"),
-                "volume": it.get("acml_tr_pbmn") or it.get("tvol"),
+                "time":   it.get("stck_cntg_hour") or it.get("stck_trd_tm") or it.get("trd_tm") or it.get("time"),
+                "open":   it.get("stck_oprc")      or it.get("opnprc"),
+                "high":   it.get("stck_hgpr")      or it.get("hgpr"),
+                "low":    it.get("stck_lwpr")      or it.get("lwpr"),
+                "close":  it.get("stck_prpr")      or it.get("clpr"),
+                "volume": it.get("cntg_vol") or it.get("acml_vol") or it.get("tvol") or it.get("acml_tr_pbmn")
             })
         return out
 
-    # ---- 3) 당일 분봉 ----
+    # ========== 3) 당일 분봉(오늘) ==========
     async def get_intraday_today(
         self,
         kis_code: str,
-        unit: Literal[1,5,15,30,60] = 1,
     ) -> List[Dict]:
         """
-        주식당일분봉조회
+        주식당일분봉조회: 오늘 1분봉 전량(30건 페이징)
         """
-        url = "/quotations/inquire-time-itemchartprice"
-        params = {
-            "fid_cond_mrkt_div_code": "J",
-            "fid_input_iscd": kis_code,
-            "fid_input_hour_1": f"{unit:02d}",
-        }
-        async with await self._client() as client:
-            r = await client.get(url, params=params)
-            r.raise_for_status()
-            j = r.json()
+        async def _page(anchor_hms: str) -> List[Dict]:
+            params = {
+                "fid_cond_mrkt_div_code": "J",
+                "fid_input_iscd": kis_code,      # 6자리
+                "fid_input_hour_1": anchor_hms,  # HHMMSS (끝시각 기준 30건)
+                "fid_pw_data_incu_yn": "Y",       # 과거 데이터 포함
+                "fid_etc_cls_code": "0",          # 기타 구분 코드(일반은 보통 '0')
+            }
+            j = await self._get(TRID_INTRADAY_TODAY, "quotations/inquire-time-itemchartprice", params)
+            rows = (j.get("output2") or j.get("output1") or j.get("output") or [])
+            return rows if isinstance(rows, list) else []
 
-        rows = j.get("output") or []
+        # 1) 현재 시각 기준 → 09:00까지
+        _, now_hms = _today_kst_range()  # ex) "142355"
+        all_rows: List[Dict] = []
+        anchor = now_hms
+        while True:
+            items = await _page(anchor)
+            if not items:
+                break
+            all_rows.extend(items)
+            times = [str(it.get("stck_cntg_hour") or it.get("stck_trd_tm") or it.get("trd_tm") or it.get("time")) for it in items]
+            times = [t for t in times if t and len(t) == 6 and t.isdigit()]
+            earliest = min(times) if times else None
+            if not earliest or earliest <= "090000":
+                break
+            h = int(earliest[0:2]); m = int(earliest[2:4]); s = int(earliest[4:6])
+            total = max(0, h*3600 + m*60 + s - 1)
+            h = total // 3600; m = (total % 3600) // 60; s = total % 60
+            anchor = f"{h:02d}{m:02d}{s:02d}"
+
+        # 2) 정규화
         out: List[Dict] = []
-        for it in rows:
+        for it in all_rows:
             out.append({
-                "date":   it.get("stck_bsop_date"),
-                "time":   it.get("stck_trd_tm"),
-                "open":   it.get("stck_oprc"),
-                "high":   it.get("stck_hgpr"),
-                "low":    it.get("stck_lwpr"),
-                "close":  it.get("stck_prpr"),
-                "volume": it.get("acml_tr_pbmn"),
+                "date":   it.get("stck_bsop_date") or it.get("date"),
+                "time":   it.get("stck_cntg_hour") or it.get("stck_trd_tm") or it.get("trd_tm") or it.get("time"),
+                "open":   it.get("stck_oprc")      or it.get("open"),
+                "high":   it.get("stck_hgpr")      or it.get("high"),
+                "low":    it.get("stck_lwpr")      or it.get("low"),
+                "close":  it.get("stck_prpr")      or it.get("close"),
+                "volume": it.get("cntg_vol") or it.get("acml_vol") or it.get("tvol") or it.get("acml_tr_pbmn"),
             })
         return out
