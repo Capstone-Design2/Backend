@@ -25,11 +25,13 @@ Backend/
 │   │   └── watchlist.py        # 관심종목 모델
 │   ├── repositories/           # 데이터 접근 계층 (DB 쿼리 로직)
 │   │   ├── __init__.py
+│   │   ├── price.py            # 시세 데이터 CRUD (upsert/쿼리)  
 │   │   ├── ticker.py           # 주식 데이터 CRUD
 │   │   └── user.py             # 사용자 CRUD
 │   ├── routers/                # API 라우터
 │   │   ├── __init__.py
 │   │   ├── auth.py             # 인증/인가 API (로그인/토큰 갱신 등)
+│   │   ├── price.py            # 시세 동기화/조회 API           
 │   │   ├── ticker.py           # 주식 데이터 API
 │   │   └── user.py             # 사용자 API
 │   ├── schemas/                # Pydantic 스키마 (요청/응답)
@@ -40,16 +42,20 @@ Backend/
 │   ├── services/               # 비즈니스 로직 계층
 │   │   ├── __init__.py
 │   │   ├── auth.py             # 인증 로직 (패스워드 검증, 토큰 발급)
+│   │   ├── kis_auth.py         # KIS 인증 매니저(토큰 획득/갱신)  
+│   │   ├── kis_prices.py       # KIS 시세 조회 클라이언트        
+│   │   ├── price.py            # 시세 수집/저장 서비스            
 │   │   ├── ticker.py           # 주식 데이터 서비스
 │   │   └── user.py             # 사용자 서비스
 │   ├── utils/                  # 유틸리티
 │   │   ├── __init__.py
 │   │   ├── datetime.py         # 날짜/시간 유틸
 │   │   ├── dependencies.py     # get_current_user 등 DI 의존성
-│   │   ├── kis_auth.py         # KIS 인증 로직 (토큰 발급)
+│   │   ├── kis_auth.py         # KIS 인증 헬퍼(저수준 유틸)       
 │   │   ├── logger.py           # 로깅 설정/헬퍼
 │   │   ├── mst_parser.py       # 주식 데이터 파일 parsing 정규식
 │   │   ├── router.py           # 라우터 공통 유틸
+│   │   ├── router_utils.py     # 라우터 부가 유틸(에러/응답 포맷) ← 추가
 │   │   └── security.py         # 해시/검증, JWT 유틸, OAuth2 스킴
 │   ├── __init__.py
 │   ├── database.py             # DB 연결/세션 관리
