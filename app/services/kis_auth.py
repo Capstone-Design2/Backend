@@ -1,10 +1,7 @@
+from __future__ import annotations
 from dotenv import load_dotenv
-import os
-import httpx
-import asyncio
-import logging
-from datetime import datetime, timedelta
-
+import os, httpx, asyncio, logging
+from datetime import datetime, timedelta, timezone
 from app.utils.datetime import utc_now
 
 load_dotenv()
@@ -22,6 +19,11 @@ if not KIS_APP_KEY or not KIS_APP_SECRET:
         "KIS_APP_KEY 또는 KIS_APP_SECRET 환경변수가 설정되지 않았습니다."
     )
 
+_SKEW = timedelta(minutes=2)
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
 
 class KISAuthManager:
     """KIS API 인증 토큰을 관리하는 싱글톤 클래스"""
@@ -37,8 +39,11 @@ class KISAuthManager:
 
     def __new__(cls):
         if cls._instance is None:
-            cls._instance = super(KISAuthManager, cls).__new__(cls)
+            cls._instance = super().__new__(cls)
         return cls._instance
+    
+    def _is_valid(self) -> bool:
+        return bool(self._access_token and self._token_expires_at and utc_now() + _SKEW < self._token_expires_at)
 
     async def _fetch_new_token(self) -> None:
         """KIS 서버로부터 새로운 액세스 토큰 발급"""
@@ -50,65 +55,77 @@ class KISAuthManager:
         }
         
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(url, json=payload)
-                response.raise_for_status()
-                data = response.json()
-
-            if "access_token" not in data or "expires_in" not in data:
-                raise RuntimeError(f"KIS 인증 응답 형식이 올바르지 않습니다: {data}")
-
-            self._access_token = data["access_token"]
-            expires_in = int(data["expires_in"])
-            
-            # 만료 시간보다 1분 먼저 갱신하도록 버퍼를 둡니다.
-            self._token_expires_at = utc_now() + timedelta(seconds=expires_in - 60)
-            logger.info(f"새로운 KIS 액세스 토큰 발급 성공. 만료 시각: {self._token_expires_at}")
-
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.post(url, json=payload)
+                r.raise_for_status()
+                data = r.json()
         except httpx.HTTPStatusError as e:
-            logger.error(f"KIS 토큰 발급 API 요청 실패: {e.response.status_code} - {e.response.text}")
+            logger.error("KIS 토큰 발급 실패: %s - %s", e.response.status_code, e.response.text)
             raise RuntimeError(f"KIS 인증 실패: {e.response.text}") from e
-        except Exception as e:
-            logger.error(f"KIS 토큰 발급 중 예외 발생: {e}")
-            raise
+
+        token = data.get("access_token")
+        if not token:
+            logger.error("KIS 토큰 응답 비정상: %s", data)
+            raise RuntimeError("KIS token issue failed: access_token missing")
+
+        # 만료 파싱: expires_in(seconds) 우선, 없으면 access_token_token_expire("YYYY-MM-DD HH:MM:SS")
+        expires_at: datetime
+        if "expires_in" in data:
+            try:
+                sec = float(data["expires_in"])
+            except Exception:
+                sec = 24 * 3600.0
+            expires_at = utc_now() + timedelta(seconds=max(60.0, sec))  # 최소 60초 보장
+        else:
+            expire_str = data.get("access_token_token_expire") or data.get("access_token_expire")
+            if expire_str:
+                # 문서별로 KST인 경우가 있어 보수적으로 UTC로 파싱 후 스큐로 보호
+                try:
+                    # 기본 포맷 가정
+                    dt = datetime.strptime(expire_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                except Exception:
+                    dt = utc_now() + timedelta(hours=24)
+                expires_at = dt
+            else:
+                expires_at = utc_now() + timedelta(hours=24)
+
+        self._access_token = token
+        # 안전 스큐 적용(조기 갱신)
+        self._token_expires_at = expires_at - _SKEW
+        logger.info("KIS 토큰 발급 완료. 만료(스큐 적용 후): %s", self._token_expires_at.isoformat())
+
 
     async def get_access_token(self) -> str:
-        """유효한 액세스 토큰을 반환 or 만료되었으면 새로 발급"""
+        if self._is_valid():
+            return self._access_token  # type: ignore
         async with self._lock:
-            if not self._access_token or not self._token_expires_at or utc_now() >= self._token_expires_at:
-                await self._fetch_new_token()
-            
-            assert self._access_token is not None, "토큰 발급 후에도 _access_token이 None입니다."
-            return self._access_token
+            if self._is_valid():
+                return self._access_token  # type: ignore
+            await self._fetch_new_token()
+            return self._access_token  # type: ignore
+
+    async def force_refresh(self) -> str:
+        async with self._lock:
+            await self._fetch_new_token()
+            return self._access_token  # type: ignore
 
     async def get_approval_key(self) -> str:
-        """웹소켓 접속을 위한 실시간 접속키(approval_key)를 발급받습니다."""
         url = f"{KIS_DOMAIN}/oauth2/Approval"
         payload = {
             "grant_type": "client_credentials",
             "appkey": self.appkey,
-            "secretkey": self.appsecret,
+            "appsecret": self.appsecret,   # ← secretkey → appsecret 로 정렬
         }
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(url, json=payload)
-                response.raise_for_status()
-                data = response.json()
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.post(url, json=payload)
+            r.raise_for_status()
+            data = r.json()
+        approval_key = data.get("approval_key")
+        if not approval_key:
+            raise RuntimeError(f"웹소켓 접속키 발급 실패: {data}")
+        return approval_key
 
-            approval_key = data.get("approval_key")
-            if not approval_key:
-                raise RuntimeError(f"웹소켓 접속키 발급 실패: {data}")
-            logger.info("웹소켓 접속키 발급 성공")
-            return approval_key
-        except Exception as e:
-            logger.error(f"웹소켓 접속키 발급 중 예외 발생: {e}")
-            raise
-
-# --- FastAPI 의존성 주입을 위한 설정 ---
-
-# 애플리케이션 생명주기 동안 유지될 싱글톤 인스턴스
+# 모듈 단위 싱글톤 인스턴스(프로세스 단위)
 _kis_auth_manager_instance = KISAuthManager()
-
 def get_kis_auth_manager() -> KISAuthManager:
-    """FastAPI 의존성 주입을 통해 KISAuthManager 싱글톤 인스턴스를 반환"""
     return _kis_auth_manager_instance

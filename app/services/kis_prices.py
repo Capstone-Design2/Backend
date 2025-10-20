@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio, time, json, random
 from collections import deque
 from enum import IntEnum
-from typing import List, Dict, Literal, Optional
+from typing import List, Dict, Literal, Optional, Tuple
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -260,56 +260,120 @@ class KISPrices:
 
     # ========== 2) 과거 분봉(일자별) ==========
     async def get_intraday_by_date(
-    self,
-    kis_code: str,
-    date: str,               # "YYYYMMDD"
+        self,
+        kis_code: str,
+        date: str,               # "YYYYMMDD"
     ) -> List[Dict]:
         """
-        주식일별분봉조회: date일의 1분봉 전량 수집(30건 페이징)
+        주식일별분봉조회(FHKST03010230): date일의 1분봉 전량 수집(30건 페이징)
+        - 중복 제거 및 최종 오름차순 정렬
+        - volume 우선순위: cntg_vol > tvol > (acml_vol 차분)    
         """
         async def _page(anchor_hms: str) -> List[Dict]:
             params = {
-                "fid_cond_mrkt_div_code": "J",
-                "fid_input_iscd": kis_code,   # 6자리
-                "fid_input_date_1": date,     # YYYYMMDD
-                "fid_input_hour_1": anchor_hms,  # HHMMSS (끝시각 기준 30건)
-                "fid_pw_data_incu_yn": "Y",     # 과거 데이터 포함
+                "FID_COND_MRKT_DIV_CODE": "J",
+                "FID_INPUT_ISCD": kis_code,        # ex) 005930
+                "FID_INPUT_DATE_1": date,          # ex) 20251020
+                "FID_INPUT_HOUR_1": anchor_hms,    # ex) 153000
+                "FID_PW_DATA_INCU_YN": "Y",
+                "FID_FAKE_TICK_INCU_YN": "",       # 공백 필수
             }
-            j = await self._get(TRID_INTRADAY_BY_DATE, "quotations/inquire-time-dailychartprice", params)
-            # 다양한 계정/버전 대응: output, output1, output2 중 배열 골라내기
+            
+            j = await self._get(
+                TRID_INTRADAY_BY_DATE,
+                "quotations/inquire-time-dailychartprice",
+                params
+            )
             rows = (j.get("output2") or j.get("output1") or j.get("output") or [])
             return rows if isinstance(rows, list) else []
 
-        # 1) 15:30부터 시작해서 09:00까지 당기기
+        # 1) 15:30부터 09:00까지 당기기 (보통 정규장)
         all_rows: List[Dict] = []
-        anchor = "153000"
+        page_limit = 400  # 안전 가드(거의 도달하지 않음)
+        seen_pages = 0
+        
+        # 첫 페이지
+        items = await _page("153000")
+
         while True:
-            items = await _page(anchor)
-            if not items:
-                break
             all_rows.extend(items)
-            # 가장 이른 체결시각 찾고 1초 줄여서 다음 페이지 요청
-            times = [str(it.get("stck_cntg_hour") or it.get("stck_trd_tm") or it.get("trd_tm") or it.get("time")) for it in items]
+
+            # 가장 이른 체결시각
+            times = [
+                str(it.get("stck_cntg_hour") or it.get("stck_trd_tm") or it.get("trd_tm") or it.get("time"))
+                for it in items
+            ]
             times = [t for t in times if t and len(t) == 6 and t.isdigit()]
             earliest = min(times) if times else None
+
+            # 더 당길 수 없거나 09:00 도달 시 종료
             if not earliest or earliest <= "090000":
                 break
+
+            # 다음 페이지 앵커 = earliest - 1초
             h = int(earliest[0:2]); m = int(earliest[2:4]); s = int(earliest[4:6])
             total = max(0, h*3600 + m*60 + s - 1)
-            h = total // 3600; m = (total % 3600) // 60; s = total % 60
-            anchor = f"{h:02d}{m:02d}{s:02d}"
+            next_anchor = f"{total // 3600:02d}{(total % 3600)//60:02d}{total % 60:02d}"
 
-        # 2) 정규화
-        out: List[Dict] = []
+            items = await _page(next_anchor)
+            if not items:
+                break
+
+            seen_pages += 1
+            if seen_pages >= page_limit:
+                break  # 비정상 루프 방지
+
+        # 2) (date,time) 기준 dedup + 정규화
+        merged: Dict[Tuple[str, str], Dict] = {}
         for it in all_rows:
+            d = str(it.get("stck_bsop_date") or date)
+            t = str(it.get("stck_cntg_hour") or it.get("stck_trd_tm") or it.get("trd_tm") or it.get("time") or "")
+            if not (len(d) == 8 and len(t) == 6 and t.isdigit()):
+                continue
+            merged[(d, t)] = {
+                "date": d, "time": t,
+                "open": it.get("stck_oprc") or it.get("opnprc"),
+                "high": it.get("stck_hgpr") or it.get("hgpr"),
+                "low":  it.get("stck_lwpr") or it.get("lwpr"),
+                "close":it.get("stck_prpr") or it.get("clpr"),
+                "cntg_vol": it.get("cntg_vol"),
+                "tvol":     it.get("tvol"),
+                "acml_vol": it.get("acml_vol"),  # 누적
+            }
+
+        # 3) 오름차순 정렬 + volume 결정(차분)
+        normalized = sorted(merged.values(), key=lambda x: (x["date"], x["time"]))
+
+        out: List[Dict] = []
+        prev_acml = None
+        prev_date = None
+        for r in normalized:
+            d, t = r["date"], r["time"]
+            vol = None
+            if r.get("cntg_vol") not in (None, ""):
+                vol = r["cntg_vol"]
+            elif r.get("tvol") not in (None, ""):
+                vol = r["tvol"]
+            else:
+                curr = r.get("acml_vol")
+                if curr not in (None, ""):
+                    if prev_date != d:
+                        prev_acml = None
+                    if prev_acml is None:
+                        vol = curr  # 첫 분봉은 누적 자체를 사용(또는 0으로 대체 가능)
+                    else:
+                        try:
+                            vol = str(max(0, int(str(curr)) - int(str(prev_acml))))
+                        except Exception:
+                            vol = None
+                    prev_acml = curr
+                    prev_date = d
+
             out.append({
-                "date":   it.get("stck_bsop_date") or date,
-                "time":   it.get("stck_cntg_hour") or it.get("stck_trd_tm") or it.get("trd_tm") or it.get("time"),
-                "open":   it.get("stck_oprc")      or it.get("opnprc"),
-                "high":   it.get("stck_hgpr")      or it.get("hgpr"),
-                "low":    it.get("stck_lwpr")      or it.get("lwpr"),
-                "close":  it.get("stck_prpr")      or it.get("clpr"),
-                "volume": it.get("cntg_vol") or it.get("acml_vol") or it.get("tvol") or it.get("acml_tr_pbmn")
+                "date": d, "time": t,
+                "open": r.get("open"), "high": r.get("high"),
+                "low":  r.get("low"),  "close": r.get("close"),
+                "volume": vol,
             })
         return out
 
