@@ -1,34 +1,39 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Annotated, Final, List, Optional, Dict, Any, Iterable, Tuple
 from datetime import datetime, timedelta
 import re
 from fastapi import Depends, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.utils.timezone import kst_ymd_to_utc_naive, kst_ymd_hms_to_utc_naive
 from app.repositories.price import upsert_price_data
 from app.database import get_session
 from app.utils.router import get_router
 from app.services.ticker import TickerService
 from app.services.kis_prices import KISPrices
+from app.utils.timezone import (
+    kst_ymd_to_utc_naive, 
+    kst_ymd_hms_to_utc_naive,
+    today_kst_datetime,
+    months_ago_kst, 
+    daterange_kst,
+    _fmt_ymd
+)
+
 from app.services.price import (
     ingest_daily_range,
     Period,         # Literal["D","W","M","Y"]
 )
 
 # ---- 동작 기본값(필요하면 여기만 바꾸면 됨) ----
-DEFAULT_DAILY_START_YMD: Final[str] = "19900101"         # 일봉 기본 시작일
-INTRADAY_LOOKBACK_DAYS: Final[int] = 15                  # 과거 분봉 조회 일수 (영업일 계산 X, 주말 제외만)
+INTRADAY_LOOKBACK_DAYS: Final[int] = 30                  # 과거 분봉 조회 일수 (영업일 계산 X, 주말 제외만)
 RESAMPLE_MINUTES: Final[List[int]] = [5, 15, 30, 60]     # 1분봉 → 리샘플 생성할 분 단위
 INCLUDE_TODAY: Final[bool] = True                        # 당일 분봉 포함 여부
 
 DATE_RE = re.compile(r"^\d{8}$")
 
 router = get_router("price")
-
-def _today_ymd_kst() -> str:
-    return datetime.now().strftime("%Y%m%d")
 
 def _daterange_ymd_for_intraday(end_ymd: str, days: int) -> List[str]:
     """주말(토/일)만 제외하고 최근 days일의 YYYYMMDD 목록 생성 (end_ymd 포함 X)"""
@@ -233,25 +238,23 @@ async def sync_intraday_today(
 
 @router.post(
     "/one/all",
-    summary="단일 종목 전체 동기화 (일봉 전구간 + 최근 N일 분봉 + 당일 분봉)",
-    description="""
-    식별자(kis_code 또는 symbol)를 통해 단일 종목을 전체 동기화합니다.
-    (분봉은 1분 전량 수집 후 5/15/30/60m를 내부 리샘플링합니다)
+    summary="삼성전자 일봉(3년)+분봉(1개월) 데이터 동기화 (KIS)",
+    description=
+    """
+    삼성전자 일봉(3년)+분봉(1개월) 데이터를 수집하고 price_data 테이블에 upsert합니다.
     """
 )
 async def ingest_one_stock_all(
-    kis_code: Optional[str] = Query(None, description="6자리 KIS 코드 (예: 005930)"),
-    symbol:   Optional[str] = Query(None, description="내부 심볼 (예: 005930.KS)"),
     db: Annotated[AsyncSession, Depends(get_session)] = None,
+    years: int = 3,
+    months: int = 1,
+    period: Period = "D"
 ):
-    # 0) 입력 검증 ------------------------------------------------------------
-    if not kis_code and not symbol:
-        raise HTTPException(status_code=400, detail="kis_code 또는 symbol 중 하나는 필수입니다.")
 
     # 1) 종목 식별 ------------------------------------------------------------
     tsvc = TickerService()
     try:
-        ticker_id, code = await tsvc.resolve_one(db, kis_code=kis_code, symbol=symbol)
+        ticker_id, code = await tsvc.resolve_one(db, kis_code="005930") # 삼성전자 코드
     except (ValueError, LookupError) as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -261,66 +264,70 @@ async def ingest_one_stock_all(
     total = 0
     per_tf: Dict[str, int] = {}
     steps: List[str] = []
+    
+    # 목표 기간 계산
+    daily_end   = today_kst_datetime()
+    daily_start = daily_end - timedelta(days=365 * years)
+    
+    now_end = daily_end
+    while now_end >= daily_start:
+        now_start = max(daily_start, now_end - timedelta(days=99))
+        
+        try:
+            # 2) 일봉 전구간 ------------------------------------------------------
+            daily_items = await kis.get_period_candles(
+                code, 
+                _fmt_ymd(now_start), 
+                _fmt_ymd(now_end), 
+                period=period
+            ) 
+            
+            daily_rows = _rows_from_items(ticker_id, daily_items, "1D")
+            synced = await _upsert_rows(db, daily_rows)
+            await db.commit()
+            
+            per_tf["1D"] = per_tf.get("1D", 0) + synced
+            total += synced
+            steps.append(f"D(1D) {_fmt_ymd(now_start)}~{_fmt_ymd(now_end)}: {synced}")
+            
+            now_end = now_start - timedelta(days=1)
+            await asyncio.sleep(0.2)
+            
+        except Exception as e:
+            await db.rollback()
+            raise HTTPException(status_code=500, detail=f"동기화 실패: {e}")
 
+        # 3) 과거 분봉 (최근 N개월) --------------------------------------------
     try:
-        # 2) 일봉 전구간 ------------------------------------------------------
-        daily_start = DEFAULT_DAILY_START_YMD
-        daily_end   = _today_ymd_kst()
-        period: Period = "D"
+        intraday_end = today_kst_datetime()
+        intraday_start = months_ago_kst(intraday_end, months)
 
-        daily_items = await kis.get_period_candles(code, daily_start, daily_end, period=period)  # type: ignore[arg-type]
-        daily_rows = _rows_from_items(ticker_id, daily_items, "1D")
-        synced = await _upsert_rows(db, daily_rows)
-        per_tf["1D"] = per_tf.get("1D", 0) + synced
-        total += synced
-        steps.append(f"D(1D): {synced}")
+        for d in daterange_kst(intraday_start, intraday_end - timedelta(days=1)):
+            ymd = d.strftime("%Y%m%d")
+            items_1m = await kis.get_intraday_by_date(code, date=ymd)
 
-        # 3) 과거 분봉 (최근 N일) --------------------------------------------
-        today_ymd = daily_end
-        intraday_dates = _daterange_ymd_for_intraday(today_ymd, INTRADAY_LOOKBACK_DAYS)
-
-        for d in intraday_dates:
-            # 1분 전량 수집
-            items_1m = await kis.get_intraday_by_date(code, d)
             rows_1m = _rows_from_items(ticker_id, items_1m, "1m")
             s1 = await _upsert_rows(db, rows_1m)
             per_tf["1m"] = per_tf.get("1m", 0) + s1
             total += s1
-            steps.append(f"Past {d} (1m/1m): {s1}")
+            steps.append(f"1m {ymd}: {s1}")
 
-            # 리샘플 TF들
-            for mins in RESAMPLE_MINUTES:
-                tf = f"{mins}m" if mins < 60 else "1h"
-                derived = _resample_from_1m(items_1m, mins)
-                rows_tf = _rows_from_items(ticker_id, derived, tf)
-                s = await _upsert_rows(db, rows_tf)
-                per_tf[tf] = per_tf.get(tf, 0) + s
-                total += s
-                steps.append(f"Past {d} ({mins}m/{tf}): {s}")
+            # 파생 리샘플 TF
+            if items_1m:
+                for mins in RESAMPLE_MINUTES:
+                    tf = f"{mins}m" if mins < 60 else "1h"
+                    derived = _resample_from_1m(items_1m, mins)
+                    rows_tf = _rows_from_items(ticker_id, derived, tf)
+                    s = await _upsert_rows(db, rows_tf)
+                    per_tf[tf] = per_tf.get(tf, 0) + s
+                    total += s
+                    steps.append(f"{tf} {ymd}: {s}")
 
-        # 4) 당일 분봉 --------------------------------------------------------
-        if INCLUDE_TODAY:
-            items_1m = await kis.get_intraday_today(code)
-            rows_1m = _rows_from_items(ticker_id, items_1m, "1m")
-            s1 = await _upsert_rows(db, rows_1m)
-            per_tf["1m"] = per_tf.get("1m", 0) + s1
-            total += s1
-            steps.append(f"Today (1m/1m): {s1}")
-
-            for mins in RESAMPLE_MINUTES:
-                tf = f"{mins}m" if mins < 60 else "1h"
-                derived = _resample_from_1m(items_1m, mins)
-                rows_tf = _rows_from_items(ticker_id, derived, tf)
-                s = await _upsert_rows(db, rows_tf)
-                per_tf[tf] = per_tf.get(tf, 0) + s
-                total += s
-                steps.append(f"Today ({mins}m/{tf}): {s}")
-
-        await db.commit()
-
+            await db.commit()
+            await asyncio.sleep(0.15)  # 레이트 리밋 여유
     except Exception as e:
         await db.rollback()
-        raise HTTPException(status_code=500, detail=f"동기화 실패: {e}")
+        raise HTTPException(status_code=500, detail=f"분봉 동기화 실패: {e}")
 
     return {
         "ticker_id": ticker_id,
@@ -328,9 +335,5 @@ async def ingest_one_stock_all(
         "synced_total": total,
         "synced_by_timeframe": per_tf,
         "steps": steps,
-        "notes": (
-            f"일봉 {DEFAULT_DAILY_START_YMD}~{_today_ymd_kst()}, "
-            f"분봉 최근 {INTRADAY_LOOKBACK_DAYS}일(+당일={INCLUDE_TODAY}), "
-            f"리샘플링={RESAMPLE_MINUTES}. (KIS 1분 전량 → 내부 리샘플)"
-        ),
+        "notes": f"일봉={years}년, 분봉={months}개월(1m 전량 수집 후 리샘플 5/15/30/60m)."
     }
