@@ -5,7 +5,7 @@ from fastapi import Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.schemas.strategy import StrategyRequest
+from app.schemas.strategy import StrategyRequest, StrategyUpdateRequest
 from app.schemas.user import UserResponse
 from app.services.strategy import StrategyService
 from app.utils.dependencies import get_current_user, get_strategy_service
@@ -57,11 +57,11 @@ async def get_user_strategies(
 @router.put("/{strategy_id}")
 async def update_strategy(
     strategy_id: int,
-    update_data: StrategyRequest,
+    request: StrategyUpdateRequest,
     db: Annotated[AsyncSession, Depends(get_session)],
     service: Annotated[StrategyService, Depends(get_strategy_service)],
 ):
-    strategy = await service.update_strategy(strategy_id, update_data, db)
+    strategy = await service.update_strategy(strategy_id, request, db)
     if strategy is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="전략 수정 실패")

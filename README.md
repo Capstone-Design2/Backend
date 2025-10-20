@@ -21,17 +21,17 @@ Backend/
 │   │   ├── strategy.py         # 전략 정보 모델
 │   │   ├── ticker.py           # 종목정보 모델
 │   │   ├── trade.py            # 거래기록 모델
-│   │   ├── user.py             # 사용자 모델 
+│   │   ├── user.py             # 사용자 모델
 │   │   └── watchlist.py        # 관심종목 모델
 │   ├── repositories/           # 데이터 접근 계층 (DB 쿼리 로직)
 │   │   ├── __init__.py
-│   │   ├── price.py            # 시세 데이터 CRUD (upsert/쿼리)  
+│   │   ├── price.py            # 시세 데이터 CRUD (upsert/쿼리)
 │   │   ├── ticker.py           # 주식 데이터 CRUD
 │   │   └── user.py             # 사용자 CRUD
 │   ├── routers/                # API 라우터
 │   │   ├── __init__.py
 │   │   ├── auth.py             # 인증/인가 API (로그인/토큰 갱신 등)
-│   │   ├── price.py            # 시세 동기화/조회 API           
+│   │   ├── price.py            # 시세 동기화/조회 API
 │   │   ├── ticker.py           # 주식 데이터 API
 │   │   └── user.py             # 사용자 API
 │   ├── schemas/                # Pydantic 스키마 (요청/응답)
@@ -42,21 +42,26 @@ Backend/
 │   ├── services/               # 비즈니스 로직 계층
 │   │   ├── __init__.py
 │   │   ├── auth.py             # 인증 로직 (패스워드 검증, 토큰 발급)
-│   │   ├── kis_auth.py         # KIS 인증 매니저(토큰 획득/갱신)  
-│   │   ├── kis_prices.py       # KIS 시세 조회 클라이언트        
-│   │   ├── price.py            # 시세 수집/저장 서비스            
+│   │   ├── kis_auth.py         # KIS 인증 매니저(토큰 획득/갱신)
+│   │   ├── kis_prices.py       # KIS 시세 조회 클라이언트
+│   │   ├── price.py            # 시세 수집/저장 서비스
+│   │   ├── strategy.py         # 전략 서비스
 │   │   ├── ticker.py           # 주식 데이터 서비스
 │   │   └── user.py             # 사용자 서비스
+│   ├── scripts/                # 유틸리티 스크립트
+│   │   ├── __init__.py
+│   │   └── seed.py             # 데이터 시딩 스크립트
 │   ├── utils/                  # 유틸리티
 │   │   ├── __init__.py
 │   │   ├── datetime.py         # 날짜/시간 유틸
 │   │   ├── dependencies.py     # get_current_user 등 DI 의존성
-│   │   ├── kis_auth.py         # KIS 인증 헬퍼(저수준 유틸)       
+│   │   ├── kis_auth.py         # KIS 인증 헬퍼(저수준 유틸)
 │   │   ├── logger.py           # 로깅 설정/헬퍼
 │   │   ├── mst_parser.py       # 주식 데이터 파일 parsing 정규식
 │   │   ├── router.py           # 라우터 공통 유틸
 │   │   ├── router_utils.py     # 라우터 부가 유틸(에러/응답 포맷) ← 추가
-│   │   └── security.py         # 해시/검증, JWT 유틸, OAuth2 스킴
+│   │   ├── security.py         # 해시/검증, JWT 유틸, OAuth2 스킴
+│   │   └── seed_data.py        # 초기 데이터 시딩 유틸
 │   ├── __init__.py
 │   ├── database.py             # DB 연결/세션 관리
 │   └── main.py                 # FastAPI 앱 진입점 (라우터 등록)
@@ -93,7 +98,22 @@ pip install -r requirements.txt
 pip install -e ".[dev]"
 ```
 
-### 3. 애플리케이션 실행
+### 3. 데이터베이스 초기화 및 데이터 시딩
+
+```bash
+# 애플리케이션을 처음 실행하면 자동으로 초기 데이터가 시딩됩니다.
+# 기본 전략 5개가 자동으로 생성됩니다:
+# - 이동평균 교차 전략
+# - RSI 과매수/과매도 전략
+# - 볼린저 밴드 돌파 전략
+# - MACD 시그널 전략
+# - 스토캐스틱 전략
+
+# 수동으로 데이터를 시딩하려면:
+python -m app.scripts.seed
+```
+
+### 4. 애플리케이션 실행
 
 ```bash
 # 개발 서버 실행
@@ -102,7 +122,7 @@ make run
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### 4. Docker로 실행
+### 5. Docker로 실행
 
 ```bash
 # Docker Compose로 전체 스택 실행

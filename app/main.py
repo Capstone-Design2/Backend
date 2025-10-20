@@ -16,12 +16,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.core.config import settings
-from app.database import init_db
+from app.database import get_session, init_db
 from app.routers import (price_router, strategy_router, ticker_router,
                          user_router)
 from app.routers.auth import router as auth_router  # ✅ 추가
 from app.utils.dependencies import get_current_user
 from app.utils.logger import sample_logger
+from app.utils.seed_data import init_seed_data
 
 
 # ----------------------------------------------------------------------
@@ -30,6 +31,17 @@ from app.utils.logger import sample_logger
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+
+    # 초기 데이터 시딩 (기본 전략 등)
+    async for session in get_session():
+        try:
+            await init_seed_data(session)
+        except Exception as e:
+            logger.error(f"데이터 시딩 중 오류 발생: {e}")
+        finally:
+            await session.close()
+        break  # 첫 번째 세션만 사용
+
     yield
 
 

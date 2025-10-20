@@ -6,7 +6,8 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.repositories.strategy import StrategyRepository
-from app.schemas.strategy import StrategyRequest, StrategyResponse
+from app.schemas.strategy import (StrategyRequest, StrategyResponse,
+                                  StrategyUpdateRequest)
 from app.schemas.user import UserResponse
 
 logger = logging.getLogger(__name__)
@@ -77,7 +78,7 @@ class StrategyService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
     async def update_strategy(
-        self, strategy_id: int, update_data: StrategyRequest, db: AsyncSession, user_id: Optional[int] = 1
+        self, strategy_id: int, request: StrategyUpdateRequest, db: AsyncSession, user_id: Optional[int] = 1
     ) -> Optional[StrategyResponse]:
         try:
             strategy_to_update = await self.strategy_repo.get_by_id(strategy_id, db)
@@ -89,7 +90,7 @@ class StrategyService:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN, detail="해당 전략을 수정할 권한이 없습니다.")
 
-            update_dict = update_data.model_dump(exclude_unset=True)
+            update_dict = request.model_dump()
 
             updated_strategy = await self.strategy_repo.update(strategy_id, update_dict, db)
             if not updated_strategy:
