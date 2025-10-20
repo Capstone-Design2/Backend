@@ -7,17 +7,18 @@ API 엔드포인트들을 정의합니다.
 
 from fastapi import APIRouter
 
-from .user import router as user_router
-from .ticker import router as ticker_router
 from .auth import router as auth_router
 from .price import router as price_router
-
+from .strategy import router as strategy_router
+from .ticker import router as ticker_router
+from .user import router as user_router
 
 __all__ = [
     "user_router",
     "ticker_router",
     "auth_router",
     "price_router",
+    "strategy_router",
 ]
 
 

@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from logging import getLogger
 from logging.config import dictConfig
 from os import environ
+from types import SimpleNamespace
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
@@ -14,15 +15,14 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.core.config import settings
 from app.database import init_db
-from app.routers import user_router
-from app.routers import user_router, ticker_router, price_router
+from app.routers import (price_router, strategy_router, ticker_router,
+                         user_router)
 from app.routers.auth import router as auth_router  # ✅ 추가
+from app.utils.dependencies import get_current_user
 from app.utils.logger import sample_logger
 
-from types import SimpleNamespace
-from app.utils.dependencies import get_current_user
-from app.core.config import settings
 
 # ----------------------------------------------------------------------
 # Lifespan: 앱 시작 시 DB 초기화
@@ -72,6 +72,8 @@ dictConfig(sample_logger)
 # ----------------------------------------------------------------------
 # 예외 핸들러
 # ----------------------------------------------------------------------
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     logger.error(
@@ -105,10 +107,13 @@ app.include_router(auth_router)  # JWT 관련 라우터 등록
 app.include_router(user_router)  # 사용자 CRUD 라우터 등록
 app.include_router(ticker_router)  # ticker 라우터 등록
 app.include_router(price_router)  # price 라우터 등록
+app.include_router(strategy_router)  # strategy 라우터 등록
 
 # ----------------------------------------------------------------------
 # 기본 라우트
 # ----------------------------------------------------------------------
+
+
 @app.get("/")
 async def root():
     return {"message": "Hello, World!"}
