@@ -26,7 +26,7 @@ engine = create_async_engine(
 async_session = async_sessionmaker(
     bind=engine,
     class_=AsyncSession,
-    expire_on_commit=True
+    expire_on_commit=False  # commit 후 객체 자동 refresh 비활성화 (greenlet 오류 방지)
 )
 
 

@@ -38,9 +38,7 @@ async def lifespan(app: FastAPI):
             await init_seed_data(session)
         except Exception as e:
             logger.error(f"데이터 시딩 중 오류 발생: {e}")
-        finally:
-            await session.close()
-        break  # 첫 번째 세션만 사용
+        break  # 첫 번째 세션만 사용 (get_session()이 자동으로 close 처리)
 
     yield
 
