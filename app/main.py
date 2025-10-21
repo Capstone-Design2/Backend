@@ -19,7 +19,7 @@ from app.core.config import settings
 from app.database import get_session, init_db
 from app.routers import (price_router, strategy_router, ticker_router,
                          user_router)
-from app.routers.auth import router as auth_router  # ✅ 추가
+from app.routers.auth import router as auth_router
 from app.utils.dependencies import get_current_user
 from app.utils.logger import sample_logger
 from app.utils.seed_data import init_seed_data
@@ -48,7 +48,7 @@ logger = getLogger(__name__)
 # ----------------------------------------------------------------------
 # 환경 변수 로드 (.env)
 # ----------------------------------------------------------------------
-load_dotenv()
+# load_dotenv() 환경변수 로드 대신 config.py에서 로드
 
 # ----------------------------------------------------------------------
 # FastAPI 애플리케이션 생성
