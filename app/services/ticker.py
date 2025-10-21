@@ -1,10 +1,11 @@
 from __future__ import annotations
+
+import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-import re
 
-from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.ticker import Ticker
@@ -14,6 +15,8 @@ from app.utils.mst_parser import parse_mst_zip
 ALLOWED_MARKETS = {"KOSPI", "KOSDAQ", "KONEX"}
 
 # 파일명에서 자동 추론
+
+
 def _guess_market_from_filename(filename: str) -> Optional[str]:
     """
     파일명으로 시장을 추정한다.
@@ -31,6 +34,7 @@ def _guess_market_from_filename(filename: str) -> Optional[str]:
         return "KONEX"
     return None
 
+
 # 심볼 suffix
 SYMBOL_SUFFIX = {
     "KOSPI":  "KS",
@@ -40,6 +44,7 @@ SYMBOL_SUFFIX = {
 
 SIX_DIGIT = re.compile(r"^\d{6}$")
 
+
 def _safe_name(name: Optional[str], limit: int = 100) -> Optional[str]:
     if not name:
         return None
@@ -48,9 +53,11 @@ def _safe_name(name: Optional[str], limit: int = 100) -> Optional[str]:
         name = name[:limit]
     return name
 
+
 def _compose_symbol_from_pdno(pdno: str, market: str) -> str:
     suf = SYMBOL_SUFFIX.get(market, market.upper())
     return f"{pdno}.{suf}"
+
 
 def _derive_kis_code_from_pdno(pdno: str) -> Optional[str]:
     return pdno if SIX_DIGIT.match(pdno) else None
@@ -68,7 +75,7 @@ class TickerService:
         for r in rows:
             pdno: str = r["pdno"]
             market: str = r["market"]
-            
+
             if market not in ALLOWED_MARKETS:
                 continue
 
@@ -79,7 +86,7 @@ class TickerService:
 
             payload.append({
                 "symbol":       symbol,
-                "kis_code":     kis_code,      
+                "kis_code":     kis_code,
                 "company_name": company_name,
                 "market":       market,
                 "currency":     "KRW",
@@ -132,12 +139,13 @@ class TickerService:
 
         total = 0
         per_market: Dict[str, int] = {}
-        files = [p for p in directory.iterdir() if p.suffix.lower() in {".zip", ".mst"} or p.name.lower().endswith(".mst.zip")]
+        files = [p for p in directory.iterdir() if p.suffix.lower(
+        ) in {".zip", ".mst"} or p.name.lower().endswith(".mst.zip")]
         processed = 0
 
         for f in sorted(files, key=lambda p: p.name.lower()):
             market = _guess_market_from_filename(f.name)
-            
+
             if market not in ALLOWED_MARKETS:
                 processed += 1
                 continue
@@ -163,7 +171,7 @@ class TickerService:
             per_market_counts=per_market,
             files_processed=processed,
         )
-        
+
     async def load_kis_to_ticker_id(self, db) -> Dict[str, int]:
         """
         tickers 테이블에서 (kis_code -> ticker_id) 맵 생성
@@ -179,7 +187,7 @@ class TickerService:
         )
         rows = (await db.execute(stmt)).all()
         return {kis: tid for kis, tid in rows if kis and SIX_DIGIT.fullmatch(kis)}
-    
+
     async def resolve_one(
         self, db, *, kis_code: Optional[str] = None, symbol: Optional[str] = None
     ) -> Tuple[int, str]:
@@ -205,9 +213,10 @@ class TickerService:
 
         row = (await db.execute(stmt)).first()
         if not row:
-            raise LookupError(f"해당 종목을 찾을 수 없습니다. (kis_code={kis_code}, symbol={symbol})")
+            raise LookupError(
+                f"해당 종목을 찾을 수 없습니다. (kis_code={kis_code}, symbol={symbol})")
         tid, kcode = row
         if not kcode or len(kcode) != 6:
-            raise LookupError(f"해당 종목은 유효한 6자리 kis_code가 없습니다. (symbol={symbol})")
+            raise LookupError(
+                f"해당 종목은 유효한 6자리 kis_code가 없습니다. (symbol={symbol})")
         return tid, kcode
-        
