@@ -102,7 +102,7 @@ class TickerService:
         if with_isin:
             stmt1 = insert(Ticker).values(with_isin)
             stmt1 = stmt1.on_conflict_do_update(
-                constraint="tickers_isin_key",
+                index_elements=[Ticker.isin],
                 set_={
                     "company_name": stmt1.excluded.company_name,
                     "kis_code":     stmt1.excluded.kis_code,
