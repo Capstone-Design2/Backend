@@ -4,11 +4,13 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.ticker import Ticker
+from app.repositories.ticker import TickerRepository
 from app.schemas.ticker import TickerSyncResponse
 from app.utils.mst_parser import parse_mst_zip
 
@@ -66,6 +68,17 @@ def _derive_kis_code_from_pdno(pdno: str) -> Optional[str]:
 class TickerService:
     def __init__(self, auth_manager=None) -> None:
         self.auth = auth_manager
+        self.ticker_repository = TickerRepository()
+
+    async def get_ticker_by_name(self, name: str, db: AsyncSession) -> Optional[Ticker]:
+        """회사명으로 티커를 조회합니다."""
+        ticker = await self.ticker_repository.get_by_name(name, db)
+        if not ticker:
+            raise HTTPException(
+                status_code=404,
+                detail=f"종목을 찾을 수 없습니다: {name}"
+            )
+        return ticker
 
     async def _upsert_batch(self, db: AsyncSession, rows: List[dict]) -> int:
         if not rows:
