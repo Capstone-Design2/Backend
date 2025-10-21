@@ -1,16 +1,12 @@
 # services/user.py
 import logging
 from typing import Optional
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.repositories.user import UserRepository
-from app.schemas import (
-    ErrorResponse,
-    UserCreateRequest,
-    UserListResponse,
-    UserResponse,
-    UserUpdateRequest,
-)
+from app.schemas import (ErrorResponse, UserCreateRequest, UserListResponse,
+                         UserResponse, UserUpdateRequest)
 
 logger = logging.getLogger(__name__)
 
@@ -38,15 +34,6 @@ class UserService:
             실패 시: (None, ErrorResponse)
         """
         try:
-            # 이메일 중복 확인
-            if await self.user_repository.exists_by_email(db, user_data.email):
-                error = ErrorResponse(
-                    error="이미 존재하는 이메일입니다.",
-                    detail=f"이메일 '{user_data.email}'은 이미 사용 중입니다.",
-                )
-                logger.warning(f"이메일 중복 생성 시도: {user_data.email}")
-                return None, error
-
             # 사용자 생성 (password는 레포지토리에서 bcrypt 해시 처리)
             user = await self.user_repository.create(db, user_data.model_dump())
             if not user:
@@ -103,7 +90,8 @@ class UserService:
         """
         try:
             users = await self.user_repository.get_all(db, skip, limit)
-            user_responses = [UserResponse.model_validate(user) for user in users]
+            user_responses = [
+                UserResponse.model_validate(user) for user in users]
             total = len(user_responses)
 
             user_list_response = UserListResponse(

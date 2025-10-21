@@ -1,19 +1,20 @@
 # utils/dependencies.py
 from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.repositories.user import UserRepository
-from app.services.user import UserService
 from app.services.auth import AuthService
+from app.services.kis_auth import KISAuthManager, get_kis_auth_manager
+from app.services.strategy import StrategyService
 from app.services.ticker import TickerService
+from app.services.user import UserService
 from app.utils.security import decode_token
-from app.services.kis_auth import get_kis_auth_manager, KISAuthManager
-
 
 # Swagger에서 Authorize → 토큰만 입력해도 Bearer 자동으로 붙음
 auth_scheme = HTTPBearer()
+
 
 def get_user_service() -> UserService:
     """
@@ -21,11 +22,13 @@ def get_user_service() -> UserService:
     """
     return UserService()
 
+
 async def get_auth_service(db: AsyncSession = Depends(get_session)) -> AuthService:
     """
     AuthService 의존성 주입용 팩토리 함수.
     """
     return AuthService(db)
+
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(auth_scheme),
@@ -36,10 +39,10 @@ async def get_current_user(
     """
     token = credentials.credentials  # <-- "Bearer xxx"에서 xxx 추출
     payload = decode_token(token)
-    
+
     if not payload or payload.get("scope") != "access":
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, 
+            status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token"
         )
 
@@ -50,7 +53,7 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token payload (sub)",
         )
-    email: str = sub 
+    email: str = sub
 
     repo = UserRepository()
     user = await repo.get_by_email(db, email)
@@ -60,7 +63,12 @@ async def get_current_user(
 
     return user
 
+
 async def get_ticker_service(
     auth_manager: KISAuthManager = Depends(get_kis_auth_manager),
 ) -> TickerService:
     return TickerService(auth_manager=auth_manager)
+
+
+async def get_strategy_service() -> StrategyService:
+    return StrategyService()

@@ -1,7 +1,9 @@
 from typing import Optional
-from sqlalchemy.dialects.postgresql import JSONB
+
 from sqlalchemy import Column, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field
+
 from app.models.base import BaseModel
 
 
@@ -12,9 +14,6 @@ class Strategy(BaseModel, table=True):
     """
 
     __tablename__ = "strategies"
-    __table_args__ = (
-    UniqueConstraint("user_id", "strategy_name", name="uq_strategy_user_name"),
-)
 
     strategy_id: Optional[int] = Field(
         default=None,
@@ -42,7 +41,6 @@ class Strategy(BaseModel, table=True):
 
     rules: dict = Field(
         default_factory=dict,
-        nullable=False,
         description="전략 룰 JSON",
         sa_column=Column(JSONB),
     )
