@@ -1,12 +1,23 @@
-from typing import Dict, Iterable, List, Final, Literal, Mapping, cast, Union
+import asyncio
+from typing import (Any, Dict, Final, Iterable, List, Literal, Mapping, Union,
+                    cast)
+
+import pandas as pd
+import yfinance
+from fastapi import HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.ticker import Ticker
+from app.repositories.price import PriceRepository, upsert_price_data
+from app.repositories.ticker import TickerRepository
+from app.schemas.price import YfinanceRequest
 from app.services.kis_prices import KISPrices
-from app.utils.timezone import kst_ymd_to_utc_naive, kst_ymd_hms_to_utc_naive
-from app.repositories.price import upsert_price_data
+from app.utils.timezone import kst_ymd_hms_to_utc_naive, kst_ymd_to_utc_naive
 
 # ---- 타입 별칭 ----
 Period = Literal["D", "W", "M", "Y"]
-Unit   = int
-TF     = Literal["1m", "5m", "15m", "30m", "1h"]
+Unit = int
+TF = Literal["1m", "5m", "15m", "30m", "1h"]
 
 ALLOWED_UNITS: Final[set[int]] = {1, 5, 15, 30, 60}
 
@@ -20,15 +31,19 @@ TF_FROM_UNIT: Final[Mapping[int, TF]] = {
 }
 
 # ---- 런타임 검증 유틸 ----
+
+
 def _ensure_period(p: str) -> Period:
     if p not in ("D", "W", "M", "Y"):
         raise ValueError(f"period must be one of 'D','W','M','Y', got {p!r}")
     return cast(Period, p)
 
+
 def _ensure_unit(u: int) -> Unit:
     if u not in ALLOWED_UNITS:
         raise ValueError(f"unit must be one of 1,5,15,30,60, got {u!r}")
     return u
+
 
 def _to_records_daily(ticker_id: int, items: List[dict]) -> List[dict]:
     out: List[dict] = []
@@ -42,11 +57,13 @@ def _to_records_daily(ticker_id: int, items: List[dict]) -> List[dict]:
         })
     return out
 
+
 def _to_records_intraday(ticker_id: int, items: List[dict], unit: Unit) -> List[dict]:
     tf: TF = TF_FROM_UNIT[unit]
     out: List[dict] = []
     for it in items:
-        ts_utc = kst_ymd_hms_to_utc_naive(it["date"], it["time"])  # KST -> UTC naive
+        ts_utc = kst_ymd_hms_to_utc_naive(
+            it["date"], it["time"])  # KST -> UTC naive
         out.append({
             "ticker_id": ticker_id, "timestamp": ts_utc, "timeframe": tf,
             "open": it.get("open"), "high": it.get("high"),
@@ -54,6 +71,7 @@ def _to_records_intraday(ticker_id: int, items: List[dict], unit: Unit) -> List[
             "volume": it.get("volume"), "source": "KIS", "is_adjusted": False,
         })
     return out
+
 
 async def ingest_daily_range(
     db,
@@ -82,6 +100,7 @@ async def ingest_daily_range(
         total += await upsert_price_data(db, buf)
     return total
 
+
 async def ingest_intraday_by_date(
     db,
     kis: KISPrices,
@@ -108,6 +127,7 @@ async def ingest_intraday_by_date(
         total += await upsert_price_data(db, buf)
     return total
 
+
 async def ingest_intraday_today(
     db,
     kis: KISPrices,
@@ -132,3 +152,89 @@ async def ingest_intraday_today(
     if buf:
         total += await upsert_price_data(db, buf)
     return total
+
+
+class PriceService:
+    def __init__(self):
+        self.price_repository = PriceRepository()
+        self.ticker_repository = TickerRepository()
+
+    async def update_price_from_yfinance(
+        self,
+        request: YfinanceRequest,
+        db: AsyncSession
+    ) -> str:
+        try:
+            # 1. Ticker 조회
+            ticker = await self.ticker_repository.get_by_name(request.ticker_name, db)
+            if not ticker:
+                raise HTTPException(status_code=404, detail="Ticker not found")
+
+            # 2. yfinance 동기 함수를 별도 스레드에서 실행
+            symbol = ticker.symbol
+            df = await asyncio.to_thread(
+                yfinance.download,
+                symbol,
+                period=request.period,
+                interval=request.interval,
+                progress=False,
+                auto_adjust=True,
+            )
+
+            if df.empty:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No data found for {symbol}"
+                )
+
+            # 3. DataFrame → DB 레코드 변환
+            rows = self._parsing_yfinance_data(
+                ticker.ticker_id, request.interval, df)
+
+            # 4. DB 저장
+            update_len = await upsert_price_data(db, rows)
+            await db.commit()
+
+            return f"Successfully updated {request.ticker_name} from yfinance, updated {update_len} rows"
+
+        except Exception as e:
+            await db.rollback()
+            # 더 자세한 에러 정보 출력
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to update price from yfinance: {str(e)} (Type: {type(e).__name__})"
+            )
+
+    def _parsing_yfinance_data(self,
+                               ticker_id: int,
+                               interval: str,
+                               df
+                               ) -> List[Dict[str, Any]]:
+
+        rows = []
+
+        # to_dict()로 변환하여 안전하게 처리
+        records = df.to_dict('index')
+
+        for timestamp, data in records.items():
+            # 각 필드를 안전하게 추출
+            open_val = data.get('Open')
+            high_val = data.get('High')
+            low_val = data.get('Low')
+            close_val = data.get('Close')
+            volume_val = data.get('Volume')
+
+            rows.append({
+                "ticker_id": int(ticker_id),
+                "timestamp": pd.Timestamp(timestamp).to_pydatetime(),
+                "timeframe": str(interval),
+                "open": None if (open_val is None or pd.isna(open_val)) else float(open_val),
+                "high": None if (high_val is None or pd.isna(high_val)) else float(high_val),
+                "low": None if (low_val is None or pd.isna(low_val)) else float(low_val),
+                "close": None if (close_val is None or pd.isna(close_val)) else float(close_val),
+                "volume": None if (volume_val is None or pd.isna(volume_val)) else int(float(volume_val)),
+                "source": "yfinance",
+                "is_adjusted": False,
+            })
+
+        return rows

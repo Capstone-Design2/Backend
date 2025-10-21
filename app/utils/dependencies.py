@@ -7,6 +7,7 @@ from app.database import get_session
 from app.repositories.user import UserRepository
 from app.services.auth import AuthService
 from app.services.kis_auth import KISAuthManager, get_kis_auth_manager
+from app.services.price import PriceService
 from app.services.strategy import StrategyService
 from app.services.ticker import TickerService
 from app.services.user import UserService
@@ -72,3 +73,7 @@ async def get_ticker_service(
 
 async def get_strategy_service() -> StrategyService:
     return StrategyService()
+
+
+async def get_price_service() -> PriceService:
+    return PriceService()

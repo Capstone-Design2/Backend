@@ -1,39 +1,36 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Annotated, Final, List, Optional, Dict, Any, Iterable, Tuple
-from datetime import datetime, timedelta
 import re
-from fastapi import Depends, Query, HTTPException
+from datetime import datetime, timedelta
+from typing import Annotated, Any, Dict, Final, Iterable, List, Optional, Tuple
+
+from fastapi import Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.repositories.price import upsert_price_data
 from app.database import get_session
-from app.utils.router import get_router
-from app.services.ticker import TickerService
+from app.repositories.price import upsert_price_data
+from app.schemas.price import YfinanceRequest
 from app.services.kis_prices import KISPrices
-from app.utils.timezone import (
-    kst_ymd_to_utc_naive, 
-    kst_ymd_hms_to_utc_naive,
-    today_kst_datetime,
-    months_ago_kst, 
-    daterange_kst,
-    _fmt_ymd
-)
-
-from app.services.price import (
-    ingest_daily_range,
-    Period,         # Literal["D","W","M","Y"]
-)
+from app.services.price import Period  # Literal["D","W","M","Y"]
+from app.services.price import PriceService, ingest_daily_range
+from app.services.ticker import TickerService
+from app.utils.dependencies import get_price_service
+from app.utils.router import get_router
+from app.utils.timezone import (_fmt_ymd, daterange_kst,
+                                kst_ymd_hms_to_utc_naive, kst_ymd_to_utc_naive,
+                                months_ago_kst, today_kst_datetime)
 
 # ---- 동작 기본값(필요하면 여기만 바꾸면 됨) ----
-INTRADAY_LOOKBACK_DAYS: Final[int] = 30                  # 과거 분봉 조회 일수 (영업일 계산 X, 주말 제외만)
+# 과거 분봉 조회 일수 (영업일 계산 X, 주말 제외만)
+INTRADAY_LOOKBACK_DAYS: Final[int] = 30
 RESAMPLE_MINUTES: Final[List[int]] = [5, 15, 30, 60]     # 1분봉 → 리샘플 생성할 분 단위
 INCLUDE_TODAY: Final[bool] = True                        # 당일 분봉 포함 여부
 
 DATE_RE = re.compile(r"^\d{8}$")
 
 router = get_router("price")
+
 
 def _daterange_ymd_for_intraday(end_ymd: str, days: int) -> List[str]:
     """주말(토/일)만 제외하고 최근 days일의 YYYYMMDD 목록 생성 (end_ymd 포함 X)"""
@@ -47,9 +44,12 @@ def _daterange_ymd_for_intraday(end_ymd: str, days: int) -> List[str]:
     out.reverse()
     return out
 
+
 def _assert_yyyymmdd(name: str, value: str) -> None:
     if not DATE_RE.match(value or ""):
-        raise HTTPException(status_code=400, detail=f"{name}는 YYYYMMDD 형식이어야 합니다.")
+        raise HTTPException(
+            status_code=400, detail=f"{name}는 YYYYMMDD 형식이어야 합니다.")
+
 
 async def _upsert_rows(db: AsyncSession, rows: Iterable[Dict[str, Any]]) -> int:
     if not rows:
@@ -58,14 +58,17 @@ async def _upsert_rows(db: AsyncSession, rows: Iterable[Dict[str, Any]]) -> int:
 
 # ---------- 리샘플링 유틸 ----------
 
+
 def _bucket_key_end(hhmmss: str, mins: int) -> str:
     """해당 분이 포함된 버킷의 '끝' 시각으로 스냅 (예: 10:03,5분→10:05:00)."""
-    h = int(hhmmss[0:2]); m = int(hhmmss[2:4])
+    h = int(hhmmss[0:2])
+    m = int(hhmmss[2:4])
     end_min = ((m // mins) + 1) * mins
     if end_min >= 60:
         h = (h + 1) % 24
         end_min -= 60
     return f"{h:02d}{end_min:02d}00"
+
 
 def _resample_from_1m(items_1m: List[Dict[str, Any]], mins: int) -> List[Dict[str, Any]]:
     """1분봉 리스트 → N분봉 리스트(open=첫, high=max, low=min, close=마지막, volume=sum)."""
@@ -80,14 +83,19 @@ def _resample_from_1m(items_1m: List[Dict[str, Any]], mins: int) -> List[Dict[st
         vol = int(v) if v is not None else 0
         b = buckets.get(k)
         if b is None:
-            buckets[k] = {"date": r.get("date"), "time": k, "open": o, "high": h, "low": l, "close": c, "volume": vol}
+            buckets[k] = {"date": r.get(
+                "date"), "time": k, "open": o, "high": h, "low": l, "close": c, "volume": vol}
         else:
             # high/low 갱신, close 갱신, volume 누적
-            if h is not None: b["high"] = max(b["high"], h)
-            if l is not None: b["low"]  = min(b["low"],  l)
-            if c is not None: b["close"] = c
+            if h is not None:
+                b["high"] = max(b["high"], h)
+            if l is not None:
+                b["low"] = min(b["low"],  l)
+            if c is not None:
+                b["close"] = c
             b["volume"] += vol
     return list(buckets.values())
+
 
 def _rows_from_items(
     ticker_id: int,
@@ -127,6 +135,7 @@ def _rows_from_items(
 
 # ---------- 엔드포인트 ----------
 
+
 @router.post(
     "/daily",
     summary="국내주식 일별 시세 동기화 (KIS)",
@@ -152,6 +161,7 @@ async def sync_daily_prices(
     )
     await db.commit()
     return {"synced": count, "timeframe": "1D"}
+
 
 @router.post(
     "/intraday/by-date",
@@ -197,6 +207,7 @@ async def sync_intraday_by_date(
     await db.commit()
     return {"synced": total_synced, "synced_by_timeframe": per_tf, "steps": steps}
 
+
 @router.post(
     "/intraday/today",
     summary="국내주식 당일 분봉 시세 동기화 (KIS)",
@@ -236,11 +247,11 @@ async def sync_intraday_today(
     await db.commit()
     return {"synced": total_synced, "synced_by_timeframe": per_tf, "steps": steps}
 
+
 @router.post(
     "/one/all",
     summary="삼성전자 일봉(3년)+분봉(1개월) 데이터 동기화 (KIS)",
-    description=
-    """
+    description="""
     삼성전자 일봉(3년)+분봉(1개월) 데이터를 수집하고 price_data 테이블에 upsert합니다.
     """
 )
@@ -254,7 +265,8 @@ async def ingest_one_stock_all(
     # 1) 종목 식별 ------------------------------------------------------------
     tsvc = TickerService()
     try:
-        ticker_id, code = await tsvc.resolve_one(db, kis_code="005930") # 삼성전자 코드
+        # 삼성전자 코드
+        ticker_id, code = await tsvc.resolve_one(db, kis_code="005930")
     except (ValueError, LookupError) as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -264,35 +276,36 @@ async def ingest_one_stock_all(
     total = 0
     per_tf: Dict[str, int] = {}
     steps: List[str] = []
-    
+
     # 목표 기간 계산
-    daily_end   = today_kst_datetime()
+    daily_end = today_kst_datetime()
     daily_start = daily_end - timedelta(days=365 * years)
-    
+
     now_end = daily_end
     while now_end >= daily_start:
         now_start = max(daily_start, now_end - timedelta(days=99))
-        
+
         try:
             # 2) 일봉 전구간 ------------------------------------------------------
             daily_items = await kis.get_period_candles(
-                code, 
-                _fmt_ymd(now_start), 
-                _fmt_ymd(now_end), 
+                code,
+                _fmt_ymd(now_start),
+                _fmt_ymd(now_end),
                 period=period
-            ) 
-            
+            )
+
             daily_rows = _rows_from_items(ticker_id, daily_items, "1D")
             synced = await _upsert_rows(db, daily_rows)
             await db.commit()
-            
+
             per_tf["1D"] = per_tf.get("1D", 0) + synced
             total += synced
-            steps.append(f"D(1D) {_fmt_ymd(now_start)}~{_fmt_ymd(now_end)}: {synced}")
-            
+            steps.append(
+                f"D(1D) {_fmt_ymd(now_start)}~{_fmt_ymd(now_end)}: {synced}")
+
             now_end = now_start - timedelta(days=1)
             await asyncio.sleep(0.2)
-            
+
         except Exception as e:
             await db.rollback()
             raise HTTPException(status_code=500, detail=f"동기화 실패: {e}")
@@ -337,3 +350,13 @@ async def ingest_one_stock_all(
         "steps": steps,
         "notes": f"일봉={years}년, 분봉={months}개월(1m 전량 수집 후 리샘플 5/15/30/60m)."
     }
+
+
+@router.post("/yfinance")
+async def update_price_from_yfinance(
+    request: YfinanceRequest,
+    service: Annotated[PriceService, Depends(get_price_service)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+):
+    result = await service.update_price_from_yfinance(request, db)
+    return result
