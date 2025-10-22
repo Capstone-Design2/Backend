@@ -152,6 +152,8 @@ async def sync_daily_prices(
     _assert_yyyymmdd("end_date", end_date)
 
     tsvc = TickerService()
+    # TODO : ticker_service가 아니라 price_service에서 처리하도록 수정하고
+    #        ticker_service에서는 ticker_repository를 통해 접근
     kis_to_tid = await tsvc.load_kis_to_ticker_id(db)
     kis = KISPrices()
 
