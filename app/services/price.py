@@ -178,7 +178,7 @@ class PriceService:
                 period=request.period,
                 interval=request.interval,
                 progress=False,
-                auto_adjust=True,
+                auto_adjust=False,  # ✅ 조정 안 함 → 정수로 나옴
             )
 
             if df.empty:
@@ -186,6 +186,11 @@ class PriceService:
                     status_code=404,
                     detail=f"No data found for {symbol}"
                 )
+
+            # ✅ 멀티인덱스 컬럼을 평평하게 만들기
+            if isinstance(df.columns, pd.MultiIndex):
+                # 컬럼이 ('Close', '005930.KS') 형태면 'Close'만 추출
+                df.columns = df.columns.get_level_values(0)
 
             # 3. DataFrame → DB 레코드 변환
             rows = self._parsing_yfinance_data(
@@ -216,8 +221,11 @@ class PriceService:
         # to_dict()로 변환하여 안전하게 처리
         records = df.to_dict('index')
 
+        # yfinance interval('1d') → DB timeframe('1D') 변환
+        timeframe = interval.upper()
+
         for timestamp, data in records.items():
-            # 각 필드를 안전하게 추출
+            # 이제 'Open', 'High' 등으로 직접 접근 가능
             open_val = data.get('Open')
             high_val = data.get('High')
             low_val = data.get('Low')
@@ -227,14 +235,14 @@ class PriceService:
             rows.append({
                 "ticker_id": int(ticker_id),
                 "timestamp": pd.Timestamp(timestamp).to_pydatetime(),
-                "timeframe": str(interval),
+                "timeframe": timeframe,
                 "open": None if (open_val is None or pd.isna(open_val)) else float(open_val),
                 "high": None if (high_val is None or pd.isna(high_val)) else float(high_val),
                 "low": None if (low_val is None or pd.isna(low_val)) else float(low_val),
                 "close": None if (close_val is None or pd.isna(close_val)) else float(close_val),
                 "volume": None if (volume_val is None or pd.isna(volume_val)) else int(float(volume_val)),
                 "source": "yfinance",
-                "is_adjusted": False,
+                "is_adjusted": False
             })
 
         return rows
