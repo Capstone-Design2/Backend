@@ -16,26 +16,6 @@ from app.utils.mst_parser import parse_mst_zip
 
 ALLOWED_MARKETS = {"KOSPI", "KOSDAQ", "KONEX"}
 
-# 파일명에서 자동 추론
-
-
-def _guess_market_from_filename(filename: str) -> Optional[str]:
-    """
-    파일명으로 시장을 추정한다.
-    - kospi_code.mst.zip / nxt_kospi_code.mst.zip -> KOSPI
-    - kosdaq_code.mst.zip / nxt_kosdaq_code.mst.zip -> KOSDAQ
-    - konex_code.mst.zip -> KONEX
-    그 외는 None 반환(스킵)
-    """
-    name = filename.lower()
-    if "kospi" in name:
-        return "KOSPI"
-    if "kosdaq" in name:
-        return "KOSDAQ"
-    if "konex" in name:
-        return "KONEX"
-    return None
-
 
 # 심볼 suffix
 SYMBOL_SUFFIX = {
@@ -47,28 +27,42 @@ SYMBOL_SUFFIX = {
 SIX_DIGIT = re.compile(r"^\d{6}$")
 
 
-def _safe_name(name: Optional[str], limit: int = 100) -> Optional[str]:
-    if not name:
-        return None
-    name = name.strip()
-    if len(name) > limit:
-        name = name[:limit]
-    return name
-
-
-def _compose_symbol_from_pdno(pdno: str, market: str) -> str:
-    suf = SYMBOL_SUFFIX.get(market, market.upper())
-    return f"{pdno}.{suf}"
-
-
-def _derive_kis_code_from_pdno(pdno: str) -> Optional[str]:
-    return pdno if SIX_DIGIT.match(pdno) else None
-
-
 class TickerService:
     def __init__(self, auth_manager=None) -> None:
         self.auth = auth_manager
         self.ticker_repository = TickerRepository()
+
+    def _guess_market_from_filename(self, filename: str) -> Optional[str]:
+        """
+        파일명으로 시장을 추정한다.
+        - kospi_code.mst.zip / nxt_kospi_code.mst.zip -> KOSPI
+        - kosdaq_code.mst.zip / nxt_kosdaq_code.mst.zip -> KOSDAQ
+        - konex_code.mst.zip -> KONEX
+        그 외는 None 반환(스킵)
+        """
+        name = filename.lower()
+        if "kospi" in name:
+            return "KOSPI"
+        if "kosdaq" in name:
+            return "KOSDAQ"
+        if "konex" in name:
+            return "KONEX"
+        return None
+
+    def _safe_name(self, name: Optional[str], limit: int = 100) -> Optional[str]:
+        if not name:
+            return None
+        name = name.strip()
+        if len(name) > limit:
+            name = name[:limit]
+        return name
+
+    def _compose_symbol_from_pdno(self, pdno: str, market: str) -> str:
+        suf = SYMBOL_SUFFIX.get(market, market.upper())
+        return f"{pdno}.{suf}"
+
+    def _derive_kis_code_from_pdno(self, pdno: str) -> Optional[str]:
+        return pdno if SIX_DIGIT.match(pdno) else None
 
     async def get_ticker_by_name(self, name: str, db: AsyncSession) -> Optional[Ticker]:
         """회사명으로 티커를 조회합니다."""
@@ -92,10 +86,10 @@ class TickerService:
             if market not in ALLOWED_MARKETS:
                 continue
 
-            symbol = _compose_symbol_from_pdno(pdno, market)
-            company_name = _safe_name(r.get("name"))
+            symbol = self._compose_symbol_from_pdno(pdno, market)
+            company_name = self._safe_name(r.get("name"))
             isin = r.get("isin")
-            kis_code = _derive_kis_code_from_pdno(pdno)
+            kis_code = self._derive_kis_code_from_pdno(pdno)
 
             payload.append({
                 "symbol":       symbol,
@@ -157,7 +151,7 @@ class TickerService:
         processed = 0
 
         for f in sorted(files, key=lambda p: p.name.lower()):
-            market = _guess_market_from_filename(f.name)
+            market = self._guess_market_from_filename(f.name)
 
             if market not in ALLOWED_MARKETS:
                 processed += 1
