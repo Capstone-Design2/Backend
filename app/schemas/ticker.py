@@ -21,14 +21,6 @@ class TickerResponse(BaseModel):
     updated_at: Optional[str] = None
 
 
-class TickerSyncRequest(BaseModel):
-    directory: Optional[str] = Field(
-        default=None,
-        example=str(settings.MST_DIR),
-        description="MST 파일들이 있는 디렉터리 경로 (상대 경로 또는 절대 경로, 미입력 시 설정값 사용)",
-    )
-
-
 class TickerSyncResponse(BaseModel):
     total_synced: int
     per_market_counts: Dict[str, int]

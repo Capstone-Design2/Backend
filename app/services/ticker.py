@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.models.ticker import Ticker
 from app.repositories.ticker import TickerRepository
 from app.schemas.ticker import TickerSyncResponse
@@ -63,16 +64,6 @@ class TickerService:
 
     def _derive_kis_code_from_pdno(self, pdno: str) -> Optional[str]:
         return pdno if SIX_DIGIT.match(pdno) else None
-
-    async def get_ticker_by_name(self, name: str, db: AsyncSession) -> Optional[Ticker]:
-        """회사명으로 티커를 조회합니다."""
-        ticker = await self.ticker_repository.get_by_name(name, db)
-        if not ticker:
-            raise HTTPException(
-                status_code=404,
-                detail=f"종목을 찾을 수 없습니다: {name}"
-            )
-        return ticker
 
     async def _upsert_batch(self, db: AsyncSession, rows: List[dict]) -> int:
         if not rows:
@@ -141,7 +132,28 @@ class TickerService:
 
         return len(payload)
 
-    async def sync_from_mst_directory(self, db: AsyncSession, directory: Path) -> TickerSyncResponse:
+    async def get_ticker_by_name(self, name: str, db: AsyncSession) -> Optional[Ticker]:
+        """회사명으로 티커를 조회합니다."""
+        ticker = await self.ticker_repository.get_by_name(name, db)
+        if not ticker:
+            raise HTTPException(
+                status_code=404,
+                detail=f"종목을 찾을 수 없습니다: {name}"
+            )
+        return ticker
+
+    async def sync_from_mst_directory(self, db: AsyncSession) -> TickerSyncResponse:
+
+        # 설정값 우선
+        directory = settings.MST_DIR
+
+        if not directory.exists():
+            raise HTTPException(
+                status_code=400,
+                detail=f"MST directory not found: {directory}. "
+                f"Set via settings.MST_DIR"
+            )
+
         assert directory.exists(), f"MST directory not found: {directory}"
 
         total = 0
@@ -178,22 +190,6 @@ class TickerService:
             per_market_counts=per_market,
             files_processed=processed,
         )
-
-    async def load_kis_to_ticker_id(self, db) -> Dict[str, int]:
-        """
-        tickers 테이블에서 (kis_code -> ticker_id) 맵 생성
-        - 주식 3시장 (KOSPI/KOSDAQ/KONEX)
-        """
-        stmt = (
-            select(
-                Ticker.__table__.c.kis_code,
-                Ticker.__table__.c.ticker_id,
-            )
-            .where(Ticker.__table__.c.market.in_(["KOSPI", "KOSDAQ", "KONEX"]))
-            .where(Ticker.__table__.c.kis_code.isnot(None))
-        )
-        rows = (await db.execute(stmt)).all()
-        return {kis: tid for kis, tid in rows if kis and SIX_DIGIT.fullmatch(kis)}
 
     async def resolve_one(
         self, db, *, kis_code: Optional[str] = None, symbol: Optional[str] = None
