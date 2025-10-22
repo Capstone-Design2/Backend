@@ -28,3 +28,9 @@ mypy==1.7.1
 
 # 로깅 및 모니터링
 python-dotenv==1.0.0
+
+#
+pandas==2.3.3
+
+#금융 API
+yfinance==0.2.66

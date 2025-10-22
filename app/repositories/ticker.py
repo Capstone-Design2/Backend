@@ -1,7 +1,11 @@
-from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Optional
+
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy import func
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.models.ticker import Ticker
+
 
 class TickerRepository:
     async def bulk_upsert_by_market_symbol(self, db: AsyncSession, rows):
@@ -20,3 +24,9 @@ class TickerRepository:
         result = await db.execute(stmt)
         await db.commit()
         return getattr(result, "rowcount", 0) or 0
+
+    async def get_by_name(self, name: str, db: AsyncSession) -> Optional[Ticker]:
+        """회사명으로 티커를 조회합니다. 없으면 None을 반환합니다."""
+        stmt = select(Ticker).where(Ticker.company_name == name)
+        result = await db.execute(stmt)
+        return result.scalars().first()

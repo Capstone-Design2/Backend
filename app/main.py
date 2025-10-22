@@ -19,7 +19,7 @@ from app.core.config import settings
 from app.database import get_session, init_db
 from app.routers import (price_router, strategy_router, ticker_router,
                          user_router)
-from app.routers.auth import router as auth_router  # ✅ 추가
+from app.routers.auth import router as auth_router
 from app.utils.dependencies import get_current_user
 from app.utils.logger import sample_logger
 from app.utils.seed_data import init_seed_data
@@ -38,9 +38,7 @@ async def lifespan(app: FastAPI):
             await init_seed_data(session)
         except Exception as e:
             logger.error(f"데이터 시딩 중 오류 발생: {e}")
-        finally:
-            await session.close()
-        break  # 첫 번째 세션만 사용
+        break  # 첫 번째 세션만 사용 (get_session()이 자동으로 close 처리)
 
     yield
 
@@ -50,7 +48,7 @@ logger = getLogger(__name__)
 # ----------------------------------------------------------------------
 # 환경 변수 로드 (.env)
 # ----------------------------------------------------------------------
-load_dotenv()
+# load_dotenv() 환경변수 로드 대신 config.py에서 로드
 
 # ----------------------------------------------------------------------
 # FastAPI 애플리케이션 생성
