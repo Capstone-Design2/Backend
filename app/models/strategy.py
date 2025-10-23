@@ -9,7 +9,7 @@ from app.models.base import BaseModel
 
 class Strategy(BaseModel, table=True):
     """
-    트레이딩 전략
+    트레이딩 전략 정보
     - rules: JSON (조건/진입/청산 규칙 등)
     """
 
