@@ -130,7 +130,7 @@ class UserService:
                 existing_user = await self.user_repository.get_by_email(
                     db, update_dict["email"]
                 )
-                if existing_user and existing_user.id != user_id:
+                if existing_user and existing_user.user_id != user_id:
                     error = ErrorResponse(
                         error="이미 존재하는 이메일입니다.",
                         detail=f"이메일 '{update_dict['email']}'은 이미 사용 중입니다.",
