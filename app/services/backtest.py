@@ -109,9 +109,6 @@ class BacktestService:
             except Exception as e:
                 print(f"⚠️ Failed to compute derived column '{key}': {e}")
 
-        print("--- Columns after indicator calculation ---")
-        print(self.data.columns.tolist())
-
     def _compute_indicator_from_spec(self, indicator: Dict[str, Any]):
         ind_type = (indicator.get("type") or "").lower()
         params = indicator.get("params", {}) or {}

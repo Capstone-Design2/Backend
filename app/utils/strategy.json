@@ -71,40 +71,25 @@
   },
 
   {
-    "strategy_name": "EMA20 > EMA60 추세 추종 (단순화)",
-    "indicators": [
-      { "key": "ema.20", "type": "ema", "params": { "length": 20 } },
-      { "key": "ema.60", "type": "ema", "params": { "length": 60 } }
-    ],
-    "rules": {
-      "buy_condition": {
-        "entry": [
-          { "type": "compare", "lhs": "ema.20", "op": ">", "rhs": "ema.60" }
-        ],
-        "exit": [{ "type": "compare", "lhs": "ema.20", "op": "<", "rhs": "ema.60" }]
-      },
-      "sell_condition": {
-          "entry": [],
-          "exit": []
-      }
-    }
-  },
-
-  {
-    "strategy_name": "EMA20 괴리율 평균회귀 (완화)",
+    "strategy_name": "EMA20 괴리율 평균회귀",
     "indicators": [
       { "key": "ema.20", "type": "ema", "params": { "length": 20 } }
     ],
     "derived": [
-      { "key": "dev.ema20", "type": "deviation_pct", "formula": "(close - ema.20) / ema.20 * 100" }
+      {
+        "key": "dev.ema20",
+        "type": "deviation_pct",
+        "formula": "(close - ema.20) / ema.20 * 100"
+      }
     ],
+    "params": { "entry_dev_abs": 0.15, "exit_dev_abs": 0.0 },
     "rules": {
       "buy_condition": {
         "entry": [
-          { "type": "threshold", "lhs": "dev.ema20", "op": "<=", "value": -0.1 }
+          { "type": "threshold", "lhs": "dev.ema20", "op": "<=", "value": -0.15 }
         ],
         "exit": [
-          { "type": "compare", "lhs": "dev.ema20", "op": ">=", "value": 0 }
+          { "type": "compare", "lhs": "dev.ema20", "op": ">=", "value": 0.0 }
         ]
       },
       "sell_condition": { "entry": [], "exit": [] }
@@ -112,20 +97,46 @@
   },
 
   {
-    "strategy_name": "볼린저 밴드 재돌파 (완화)",
+    "strategy_name": "볼린저 스퀴즈 돌파 + 밴드워킹",
     "indicators": [
-      { "key": "bb.20", "type": "bollinger_bands", "params": { "length": 20, "stddev": 2 } }
+      {
+        "key": "bb.20",
+        "type": "bollinger_bands",
+        "params": { "length": 20, "stddev": 2 }
+      }
     ],
+    "derived": [
+      {
+        "key": "bbwidth.20",
+        "type": "formula",
+        "formula": "(bb.20.upper - bb.20.lower) / bb.20.middle"
+      },
+      {
+        "key": "slope.bb20.mid",
+        "type": "formula",
+        "formula": "bb.20.middle - shift(bb.20.middle, 1)"
+      }
+    ],
+    "params": { "sq_thresh": 0.12 },
     "rules": {
       "buy_condition": {
         "entry": [
-          { "type": "compare", "lhs": "close", "op": ">", "rhs": "bb.20.middle" }
+          { "type": "threshold", "lhs": "bbwidth.20", "op": "<=", "value": 0.12 },
+          { "type": "crosses_above", "lhs": "close", "rhs": "bb.20.middle" }
         ],
         "exit": [
-          { "type": "compare", "lhs": "close", "op": "<", "rhs": "bb.20.middle" }
+          { "type": "crosses_below", "lhs": "close", "rhs": "bb.20.middle" }
         ]
       },
-      "sell_condition": { "entry": [], "exit": [] }
+      "sell_condition": {
+        "entry": [
+          { "type": "threshold", "lhs": "bbwidth.20", "op": "<=", "value": 0.12 },
+          { "type": "crosses_below", "lhs": "close", "rhs": "bb.20.middle" }
+        ],
+        "exit": [
+          { "type": "crosses_above", "lhs": "close", "rhs": "bb.20.middle" }
+        ]
+      }
     }
   }
 ]
