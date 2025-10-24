@@ -63,5 +63,21 @@ async def upsert_price_data(db: AsyncSession, rows: Iterable[Dict[str, Any]]) ->
             status_code=500, detail=f"Failed to upsert price data: {e}")
 
 
+from datetime import date
+from sqlalchemy import select
+
 class PriceRepository:
-    pass
+    async def get_price_data(
+        self, ticker_id: int, start_date: date, end_date: date, db: AsyncSession
+    ) -> List[PriceData]:
+        stmt = (
+            select(PriceData)
+            .where(
+                PriceData.ticker_id == ticker_id,
+                PriceData.timestamp >= start_date,
+                PriceData.timestamp <= end_date,
+            )
+            .order_by(PriceData.timestamp)
+        )
+        result = await db.execute(stmt)
+        return result.scalars().all()

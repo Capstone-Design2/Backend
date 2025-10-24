@@ -6,8 +6,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.repositories.strategy import StrategyRepository
-from app.schemas.strategy import (StrategyRequest, StrategyResponse,
-                                  StrategyUpdateRequest)
+from app.schemas.strategy import (StrategyRequest, StrategyResponse, StrategyUpdateRequest)
 from app.schemas.user import UserResponse
 
 logger = logging.getLogger(__name__)
