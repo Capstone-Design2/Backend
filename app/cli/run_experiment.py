@@ -52,7 +52,8 @@ async def main():
                 df[col] = pd.to_numeric(df[col], errors='coerce')
         # ------------------
         
-        backtest_service = BacktestService(strategy.model_dump(), df)
+        spec = strategy.rules  # ← DB에 저장된 전체 전략 dict
+        backtest_service = BacktestService(spec, df)        
         results = backtest_service.run()
 
         if "error" in results:
@@ -90,13 +91,20 @@ async def main():
 
         print(f"Backtest finished. Results saved to {filename_base}*")
         
-        # after results saved ...
-        print(f"Trades: {len(results.get('trades', []))}")
+        print("has dev.ema20?", 'dev.ema20' in df.columns, "min/max:", 
+            df.get('dev.ema20').min() if 'dev.ema20' in df.columns else None, 
+            df.get('dev.ema20').max() if 'dev.ema20' in df.columns else None)
+
+        print("has bb.20.middle?", 'bb.20.middle' in df.columns, "NaN ratio:", 
+            float(df['bb.20.middle'].isna().mean()) if 'bb.20.middle' in df.columns else None)
+        
+        k = results
+        print(f"Trades: {len(k.get('trades', []))}")
         print({
-            'CAGR': round(results.get('cagr', 0)*100, 2),
-            'Sharpe': round(results.get('sharpe', 0), 2),
-            'MDD(%)': round(results.get('max_drawdown', 0)*100, 2),
-            'Calmar': round(results.get('calmar', 0), 2),
+            'CAGR(%)': round(float(k.get('cagr', 0))*100, 2),
+            'Sharpe': round(float(k.get('sharpe', 0)), 2),
+            'MDD(%)': round(float(k.get('max_drawdown', 0))*100, 2),
+            'Calmar': round(float(k.get('calmar', 0)), 2),
         })
 
 if __name__ == "__main__":

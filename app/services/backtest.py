@@ -35,30 +35,81 @@ class BacktestService:
         self._calculate_metrics()
         return self.results
 
-    # ---------- indicator calc ----------
     def _calculate_indicators(self):
-        """
-        1) strategy['indicators']가 있으면 그대로 계산
-        2) 없거나 부족하면 rules/derived를 스캔해 필요한 지표(ema.N, bb.N.*) 자동 계산
-        3) derived/formula 계산(shift() 지원)
-        """
-        # 1) 명시된 indicators 계산
-        for indicator in (self.strategy.get("indicators") or []):
-            self._compute_indicator_from_spec(indicator)
+        # 1) 기본 지표 계산
+        for ind in self.strategy.get("indicators", []):
+            t = ind["type"]
+            k = ind["key"]
+            p = ind.get("params", {})
 
-        # 2) 규칙/파생식에서 필요한 지표 토큰 자동 추출 후 보충 계산
-        needed = self._infer_needed_indicators_from_rules_and_derived()
-        self._compute_missing_inferred_indicators(needed)
+            if t == "ema":
+                self.data[k] = ta.ema(self.data["close"], length=p.get("length", 20))
 
-        # 3) 파생식 계산
-        for derived in (self.strategy.get("derived") or []):
-            formula = derived.get("formula")
-            out_key = derived.get("key")
-            if not formula or not out_key:
+            elif t == "bollinger_bands":
+                bb = ta.bbands(
+                    self.data["close"],
+                    length=p.get("length", 20),
+                    std=p.get("stddev", 2),   # json은 stddev, pandas-ta는 std
+                )
+                # ⬇️ 열 이름을 안전하게 매핑 (버전별 명칭 차이 대응)
+                def first_col(prefix):
+                    return next((c for c in bb.columns if str(c).startswith(prefix)), None)
+
+                lower_col  = first_col("BBL_") or first_col("BBL")
+                middle_col = first_col("BBM_") or first_col("BBM")
+                upper_col  = first_col("BBU_") or first_col("BBU")
+
+                if lower_col is None or middle_col is None or upper_col is None:
+                    raise RuntimeError(f"Unexpected BBANDS columns: {list(bb.columns)}")
+
+                self.data[f"{k}.lower"]  = bb[lower_col]
+                self.data[f"{k}.middle"] = bb[middle_col]
+                self.data[f"{k}.upper"]  = bb[upper_col]
+
+        # 2) 파생 지표 계산 (점(.) 컬럼명 & shift() 지원)
+        def _safe_eval(formula: str) -> str:
+            # 컬럼명이 식별자 규칙을 어기면 backtick으로 감쌉니다.
+            cols = sorted(self.data.columns.tolist(), key=len, reverse=True)
+            safe = formula
+            for col in cols:
+                # 이미 backtick으로 감싸진 경우는 건너뜀
+                if f"`{col}`" in safe:
+                    continue
+                # 정규식으로 정확히 해당 토큰만 치환
+                safe = re.sub(rf'(?<![`"\w]){re.escape(col)}(?![`"\w])', f"`{col}`", safe)
+            return safe
+
+        for drv in self.strategy.get("derived", []):
+            key = drv["key"]
+            formula = drv.get("formula")
+            if not formula:
                 continue
-            self.data[out_key] = self._eval_formula(formula)
 
-        print("\n--- Columns after indicator calculation ---")
+            try:
+                if "shift(" in formula:
+                    # 아주 단순한 형태:  foo - shift(foo, 1)
+                    m = re.match(r'^\s*([A-Za-z0-9._]+)\s*-\s*shift\(\s*([A-Za-z0-9._]+)\s*,\s*(\d+)\s*\)\s*$', formula)
+                    if m:
+                        a, b, n = m.group(1), m.group(2), int(m.group(3))
+                        self.data[key] = self.data[a] - self.data[b].shift(n)
+                    else:
+                        # 그 외 일반식은 shift 부분만 치환 후 eval
+                        def repl(match):
+                            col = match.group(1)
+                            n   = int(match.group(2))
+                            return f"({f'`{col}`' if '.' in col or ' ' in col else col}).shift({n})"
+
+                        tmp = re.sub(r'shift\(\s*([A-Za-z0-9._]+)\s*,\s*(\d+)\s*\)', repl, formula)
+                        self.data[key] = self.data.eval(_safe_eval(tmp), engine="python")
+                else:
+                    self.data[key] = self.data.eval(_safe_eval(formula), engine="python")
+
+                print(f"✅ Derived column '{key}' calculated.")
+
+            except Exception as e:
+                print(f"⚠️ Failed to compute derived column '{key}': {e}")
+
+        print("--- Columns after indicator calculation ---")
         print(self.data.columns.tolist())
 
     def _compute_indicator_from_spec(self, indicator: Dict[str, Any]):
