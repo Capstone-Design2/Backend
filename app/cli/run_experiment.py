@@ -41,7 +41,18 @@ async def main():
             print("No price data found for the given ticker and date range.")
             return
 
-        backtest_service = BacktestService(strategy.model_dump(), [p.model_dump() for p in price_data])
+        # --- [핵심 수정] ---
+        # BacktestService에 전달하기 전에 데이터를 DataFrame으로 만들고 타입을 변환합니다.
+        price_data_dict = [p.model_dump() for p in price_data]
+        df = pd.DataFrame(price_data_dict)
+        
+        price_cols = ['open', 'high', 'low', 'close', 'volume']
+        for col in price_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        # ------------------
+        
+        backtest_service = BacktestService(strategy.model_dump(), df)
         results = backtest_service.run()
 
         if "error" in results:
@@ -61,7 +72,7 @@ async def main():
                 writer = csv.DictWriter(f, fieldnames=results['trades'][0].keys())
                 writer.writeheader()
                 writer.writerows(results['trades'])
-        else:  # 래가 없을 경우 메시지 출력
+        else:  # 거래가 없을 경우 메시지 출력
             print("No trades were executed during the backtest.")
 
         # Save equity curve to CSV
@@ -78,6 +89,15 @@ async def main():
         plt.savefig(f"{filename_base}_equity.png")
 
         print(f"Backtest finished. Results saved to {filename_base}*")
+        
+        # after results saved ...
+        print(f"Trades: {len(results.get('trades', []))}")
+        print({
+            'CAGR': round(results.get('cagr', 0)*100, 2),
+            'Sharpe': round(results.get('sharpe', 0), 2),
+            'MDD(%)': round(results.get('max_drawdown', 0)*100, 2),
+            'Calmar': round(results.get('calmar', 0), 2),
+        })
 
 if __name__ == "__main__":
     asyncio.run(main())

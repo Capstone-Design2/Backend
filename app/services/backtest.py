@@ -1,189 +1,338 @@
 # app/services/backtest.py
+import re
+from typing import Dict, List, Any, Optional, Set, Tuple
+
+import numpy as np
 import pandas as pd
 import pandas_ta as ta
-import numpy as np
-from typing import Dict, List, Any
+
 from app.services.kpi_service import KpiService
 
-class BacktestService:
-    def __init__(self, strategy: Dict[str, Any], data: List[Dict[str, Any]]):
-        self.strategy = strategy
-        self.data = pd.DataFrame(data)
-        
-        # --- [추가] 가격 관련 컬럼을 float으로 미리 변환 ---
-        price_cols = ['open', 'high', 'low', 'close']
-        for col in price_cols:
-            if col in self.data.columns:
-                self.data[col] = pd.to_numeric(self.data[col])
-        # --------------------------------------------------
-        
-        self.results = {}
-        self.initial_balance = 1000000
 
+class BacktestService:
+    def __init__(self, strategy: Dict[str, Any], data: pd.DataFrame):
+        self.strategy = strategy or {}
+        self.data = data.copy()
+        self.results: Dict[str, Any] = {}
+        self.initial_balance: float = float(1_000_000)
+
+    # ---------- public ----------
     def run(self) -> Dict[str, Any]:
-        # --- [디버깅용 print문 추가] ---
-        print("--- Original Data Head ---")
-        print(self.data.head()) # 데이터 시작 부분 확인
-        print("--- Original Data Tail ---")
-        print(self.data.tail()) # 데이터 끝 부분 확인
-        
-        if len(self.data) < 2:
+        if not isinstance(self.data, pd.DataFrame) or len(self.data) < 2:
             return {"error": "Not enough data to run backtest"}
+
+        # 정렬 및 기본 전처리
+        if "timestamp" in self.data.columns:
+            self.data["timestamp"] = pd.to_datetime(self.data["timestamp"])
+            self.data = self.data.sort_values("timestamp").reset_index(drop=True)
+
+        for c in ("open", "high", "low", "close", "volume"):
+            if c in self.data.columns:
+                self.data[c] = pd.to_numeric(self.data[c], errors="coerce")
+
         self._calculate_indicators()
         self._execute_trades()
         self._calculate_metrics()
         return self.results
 
+    # ---------- indicator calc ----------
     def _calculate_indicators(self):
-        # strategy.json에 정의된 모든 지표를 계산합니다.
-        for indicator in self.strategy.get('indicators', []):
-            indicator_type = indicator.get('type')
-            params = indicator.get('params', {})
-            key = indicator.get('key')  # JSON에 정의된 key (e.g., "ema.20")
+        """
+        1) strategy['indicators']가 있으면 그대로 계산
+        2) 없거나 부족하면 rules/derived를 스캔해 필요한 지표(ema.N, bb.N.*) 자동 계산
+        3) derived/formula 계산(shift() 지원)
+        """
+        # 1) 명시된 indicators 계산
+        for indicator in (self.strategy.get("indicators") or []):
+            self._compute_indicator_from_spec(indicator)
 
-            try:
-                # --- [핵심 수정] ---
-                # ta.ema(), ta.bbands() 등 함수를 pandas_ta 라이브러리에서 직접 호출합니다.
-                if indicator_type == 'ema':
-                    # ta.ema(데이터, 파라미터) 형식으로 직접 호출
-                    indicator_result = ta.ema(self.data['close'], **params)
-                    # JSON에 정의된 key를 컬럼 이름으로 사용
-                    self.data[key] = indicator_result
+        # 2) 규칙/파생식에서 필요한 지표 토큰 자동 추출 후 보충 계산
+        needed = self._infer_needed_indicators_from_rules_and_derived()
+        self._compute_missing_inferred_indicators(needed)
 
-                elif indicator_type == 'bollinger_bands':
-                    # pandas-ta는 볼린저 밴드를 'bbands'로 호출합니다.
-                    indicator_result = ta.bbands(self.data['close'], **params)
-                    
-                    # 결과(DataFrame)의 컬럼 이름을 JSON 형식에 맞게 변경합니다.
-                    # e.g., 'BBL_20_2.0' -> 'bb.20.lower'
-                    rename_map = {
-                        f'BBL_{params["length"]}_{params["stddev"]}': f'{key}.lower',
-                        f'BBM_{params["length"]}_{params["stddev"]}': f'{key}.middle',
-                        f'BBU_{params["length"]}_{params["stddev"]}': f'{key}.upper',
-                        f'BBB_{params["length"]}_{params["stddev"]}': f'{key}.bandwidth',
-                        f'BBP_{params["length"]}_{params["stddev"]}': f'{key}.percent',
-                    }
-                    indicator_result.rename(columns=rename_map, inplace=True)
-                    
-                    # 원래 데이터와 합칩니다.
-                    self.data = pd.concat([self.data, indicator_result], axis=1)
+        # 3) 파생식 계산
+        for derived in (self.strategy.get("derived") or []):
+            formula = derived.get("formula")
+            out_key = derived.get("key")
+            if not formula or not out_key:
+                continue
+            self.data[out_key] = self._eval_formula(formula)
 
-            except Exception as e:
-                print(f"지표 계산 중 오류 발생 ({indicator_type}): {e}")
+        print("\n--- Columns after indicator calculation ---")
+        print(self.data.columns.tolist())
 
-        # 파생 지표 계산 (기존 로직 유지)
-        for derived in self.strategy.get('derived', []):
-            formula = derived.get('formula')
-            key = derived.get('key')
-            if formula and key:
-                try:
-                    self.data[key] = self.data.eval(formula)
-                except Exception as e:
-                    print(f"파생 지표 계산 중 오류 ({key}): {e}")
+    def _compute_indicator_from_spec(self, indicator: Dict[str, Any]):
+        ind_type = (indicator.get("type") or "").lower()
+        params = indicator.get("params", {}) or {}
+        key = indicator.get("key")
 
-        # --- [디버깅용 print문] ---
-        # 이제 EMA 컬럼이 정상적으로 생성되었는지 확인합니다.
-        print("\n--- All Column Names (After Calculation) ---")
-        print(self.data.columns)
-        # ---------------------------
+        if ind_type == "ema":
+            length = int(params.get("length", 20))
+            self.data[key] = ta.ema(self.data["close"], length=length)
 
+        elif ind_type == "sma":
+            length = int(params.get("length", 20))
+            self.data[key] = ta.sma(self.data["close"], length=length)
+
+        elif ind_type in ("bollinger_bands", "bbands", "bb"):
+            length = int(params.get("length", 20))
+            std = float(params.get("stddev", params.get("std", 2)))
+            self._compute_bbands(length, std)
+
+        # 필요시 추가 지표 확장 가능
+
+    def _infer_needed_indicators_from_rules_and_derived(self) -> Set[str]:
+        """rules/derived 안의 토큰에서 ema.N / bb.N.(lower|middle|upper) 요구사항을 추출"""
+        needed: Set[str] = set()
+
+        def scan_text(txt: str):
+            # ema.20, ema.60 같은 토큰
+            for m in re.finditer(r"\bema\.(\d+)\b", txt, flags=re.IGNORECASE):
+                needed.add(f"ema.{int(m.group(1))}")
+            # bb.20.lower/middle/upper
+            for m in re.finditer(r"\bbb\.(\d+)\.(lower|middle|upper)\b", txt, flags=re.IGNORECASE):
+                needed.add(f"bb.{int(m.group(1))}.{m.group(2).lower()}")
+
+        # rules 전체 순회
+        def walk(obj: Any):
+            if isinstance(obj, dict):
+                for k, v in obj.items():
+                    if k in ("lhs", "rhs", "key", "formula"):
+                        if isinstance(v, str):
+                            scan_text(v)
+                    walk(v)
+            elif isinstance(obj, list):
+                for it in obj:
+                    walk(it)
+
+        walk(self.strategy.get("rules", {}))
+        walk(self.strategy.get("derived", []))
+
+        return needed
+
+    def _compute_missing_inferred_indicators(self, needed: Set[str]):
+        # 이미 존재하는 컬럼은 제외
+        missing = [tok for tok in needed if tok not in self.data.columns]
+        if not missing:
+            return
+
+        # 필요한 ema 길이들
+        ema_lengths = sorted({int(m.group(1)) for m in [re.match(r"ema\.(\d+)$", t) for t in missing] if m})
+        for L in ema_lengths:
+            col = f"ema.{L}"
+            if col not in self.data.columns:
+                self.data[col] = ta.ema(self.data["close"], length=L)
+
+        # 필요한 bb 길이들(하나라도 필요하면 세 라인 모두 계산)
+        bb_lengths = sorted({int(m.group(1)) for m in [re.match(r"bb\.(\d+)\.(lower|middle|upper)$", t) for t in missing] if m})
+        for L in bb_lengths:
+            # 표준편차는 전략에 명시된 값 우선, 없으면 2
+            std = self._find_bb_std_from_strategy_or_default(L)
+            self._compute_bbands(L, std)
+
+    def _find_bb_std_from_strategy_or_default(self, length: int) -> float:
+        # indicators에 명시된 stddev를 찾고, 없으면 2.0
+        for indicator in (self.strategy.get("indicators") or []):
+            t = (indicator.get("type") or "").lower()
+            if t in ("bollinger_bands", "bbands", "bb"):
+                params = indicator.get("params", {}) or {}
+                L = int(params.get("length", -1))
+                if L == length:
+                    return float(params.get("stddev", params.get("std", 2)))
+        return 2.0
+
+    def _compute_bbands(self, length: int, std: float):
+        bb = ta.bbands(self.data["close"], length=length, std=std)
+        bbl = bb.filter(like="BBL").iloc[:, 0]
+        bbm = bb.filter(like="BBM").iloc[:, 0]
+        bbu = bb.filter(like="BBU").iloc[:, 0]
+        self.data[f"bb.{length}.lower"] = bbl
+        self.data[f"bb.{length}.middle"] = bbm
+        self.data[f"bb.{length}.upper"] = bbu
+
+    # ---------- formula eval ----------
+    def _eval_formula(self, formula: str) -> pd.Series:
+        """
+        간단한 수식 평가:
+        - shift(col, n) 지원 → self.data['col'].shift(n) 로 치환
+        - self.data의 컬럼 토큰을 self.data['token']으로 치환
+        """
+        f = str(formula)
+
+        def _shift_repl(m):
+            col = m.group(1).strip()
+            n = int(m.group(2))
+            return f"self.data['{col}'].shift({n})"
+
+        f = re.sub(r"shift\(\s*([A-Za-z0-9_.]+)\s*,\s*(-?\d+)\s*\)", _shift_repl, f)
+
+        tokens = sorted(set(re.findall(r"[A-Za-z_][A-Za-z0-9_.]*", f)), key=len, reverse=True)
+        exclude = {"shift"}
+        for t in tokens:
+            if t in exclude:
+                continue
+            if t in self.data.columns:
+                f = re.sub(rf"\b{re.escape(t)}\b", f"self.data['{t}']", f)
+
+        try:
+            out = eval(f)
+        except Exception:
+            out = pd.Series(np.nan, index=self.data.index)
+        return out
+
+    # ---------- conditions ----------
     def _evaluate_condition(self, condition: Dict[str, Any], i: int) -> bool:
-        cond_type = condition.get('type')
-        if cond_type == 'compare':
-            lhs_key = condition['lhs']
-            rhs_key = condition['rhs']
-            if lhs_key not in self.data.columns or rhs_key not in self.data.columns:
+        ct = (condition.get("type") or "").lower()
+
+        def get_val(token, idx):
+            if token is None:
+                return None
+            if isinstance(token, (int, float, np.floating)):
+                return float(token)
+            if isinstance(token, str):
+                if token in self.data.columns:
+                    v = self.data[token].iloc[idx]
+                    try:
+                        return float(v)
+                    except Exception:
+                        return v
+                try:
+                    return float(token)
+                except Exception:
+                    return None
+            return None
+
+        if ct == "compare":
+            lhs = condition.get("lhs")
+            rhs = condition.get("rhs")
+            value = condition.get("value")
+            op = condition.get("op")
+            a = get_val(lhs, i)
+            b = get_val(rhs, i) if rhs is not None else get_val(value, i)
+            if a is None or b is None:
                 return False
-            lhs = self.data[lhs_key][i]
-            rhs = self.data[rhs_key][i]
-            op = condition['op']
-            ops = {'<=': lambda a, b: a <= b, '>=': lambda a, b: a >= b, '<': lambda a, b: a < b, '>': lambda a, b: a > b}
-            if op in ops:
-                return ops[op](lhs, rhs)
-        elif cond_type == 'crosses_above':
-            lhs_key = condition['lhs']
-            rhs_key = condition['rhs']
-            if lhs_key not in self.data.columns or rhs_key not in self.data.columns:
+            ops = {"<=": lambda x,y: x <= y, ">=": lambda x,y: x >= y,
+                   "<": lambda x,y: x < y, ">": lambda x,y: x > y, "==": lambda x,y: x == y}
+            return ops.get(op, lambda *_: False)(a, b)
+
+        if ct == "threshold":
+            lhs = condition.get("lhs")
+            op = condition.get("op")
+            value = condition.get("value")
+            a = get_val(lhs, i)
+            b = get_val(value, i)
+            if a is None or b is None:
                 return False
-            
-            # --- [디버깅용 print문 추가] ---
-            # i가 특정 값일 때 (예: 마지막 날) 값들을 출력해봅니다.
-            if i == len(self.data) - 1: 
-                print(f"\n--- Evaluating 'crosses_above' at index {i} ---")
-                print(f"Yesterday: {lhs_key}[{i-1}] = {self.data[lhs_key][i-1]}, {rhs_key}[{i-1}] = {self.data[rhs_key][i-1]}")
-                print(f"Today:     {lhs_key}[{i}] = {self.data[lhs_key][i]}, {rhs_key}[{i}] = {self.data[rhs_key][i]}")
-            # -----------------------------
-            
-            return self.data[lhs_key][i-1] < self.data[rhs_key][i-1] and self.data[lhs_key][i] > self.data[rhs_key][i]
-        elif cond_type == 'crosses_below':
-            lhs_key = condition['lhs']
-            rhs_key = condition['rhs']
-            if lhs_key not in self.data.columns or rhs_key not in self.data.columns:
+            ops = {"<=": lambda x,y: x <= y, ">=": lambda x,y: x >= y,
+                   "<": lambda x,y: x < y, ">": lambda x,y: x > y, "==": lambda x,y: x == y}
+            return ops.get(op, lambda *_: False)(a, b)
+
+        if ct == "crosses_above":
+            lhs, rhs = condition.get("lhs"), condition.get("rhs")
+            if i == 0 or lhs not in self.data.columns or rhs not in self.data.columns:
                 return False
-            return self.data[lhs_key][i-1] > self.data[rhs_key][i-1] and self.data[lhs_key][i] < self.data[rhs_key][i]
-        elif cond_type == 'touched_within':
-            within = condition['within']
-            sub_condition = condition['condition']
-            for j in range(max(0, i - within), i + 1):
-                if self._evaluate_condition(sub_condition, j):
+            return (self.data[lhs].iloc[i-1] < self.data[rhs].iloc[i-1]) and \
+                   (self.data[lhs].iloc[i] > self.data[rhs].iloc[i])
+
+        if ct == "crosses_below":
+            lhs, rhs = condition.get("lhs"), condition.get("rhs")
+            if i == 0 or lhs not in self.data.columns or rhs not in self.data.columns:
+                return False
+            return (self.data[lhs].iloc[i-1] > self.data[rhs].iloc[i-1]) and \
+                   (self.data[lhs].iloc[i] < self.data[rhs].iloc[i])
+
+        if ct == "touched_within":
+            within = int(condition.get("within", 1))
+            inner = condition.get("condition", {}) or {}
+            start = max(0, i - within + 1)
+            for j in range(start, i + 1):
+                if self._evaluate_condition(inner, j):
                     return True
             return False
-        elif cond_type == 'threshold':
-            lhs_key = condition['lhs']
-            if lhs_key not in self.data.columns:
-                return False
-            lhs = self.data[lhs_key][i]
-            value = condition['value']
-            op = condition['op']
-            ops = {'<=': lambda a, b: a <= b, '>=': lambda a, b: a >= b, '<': lambda a, b: a < b, '>': lambda a, b: a > b}
-            if op in ops:
-                return ops[op](lhs, value)
+
         return False
 
+    # ---------- backtest core ----------
     def _execute_trades(self):
-        self.data['signal'] = 0
-        self.data['position'] = 0
-        self.data['equity'] = float(self.initial_balance)
-        trades = []
-        position = 0
+        self.data["signal"] = 0
+        self.data["position"] = 0.0
+        self.data["equity"] = float(self.initial_balance)
 
-        for i in range(1, len(self.data)):
-            if position == 0:
-                if all(self._evaluate_condition(cond, i) for cond in self.strategy.get('rules', {}).get('buy_condition', {}).get('entry', [])):
-                    self.data.loc[i, 'signal'] = 1
-                    position = 1
-                    trades.append({'timestamp': self.data['timestamp'][i], 'price': self.data['close'][i], 'side': 'buy'})
-                elif all(self._evaluate_condition(cond, i) for cond in self.strategy.get('rules', {}).get('sell_condition', {}).get('entry', [])):
-                    self.data.loc[i, 'signal'] = -1
-                    position = -1
-                    trades.append({'timestamp': self.data['timestamp'][i], 'price': self.data['close'][i], 'side': 'sell'})
-            elif position == 1:
-                if any(self._evaluate_condition(cond, i) for cond in self.strategy.get('rules', {}).get('buy_condition', {}).get('exit', [])):
-                    self.data.loc[i, 'signal'] = -1
+        trades: List[Dict[str, Any]] = []
+        position: int = 0  # -1/0/1
+
+        max_lookback = self._max_lookback_from_available_columns()
+        start = max(1, max_lookback)
+        self.data.loc[start-1, "position"] = 0.0
+        self.data.loc[start-1, "equity"] = float(self.initial_balance)
+
+        rules = self.strategy.get("rules", {}) or {}
+        buy_rules = (rules.get("buy_condition") or {})
+        sell_rules = (rules.get("sell_condition") or {})
+
+        for i in range(start, len(self.data)):
+            # 1) Exit
+            if position == 1:
+                exits = buy_rules.get("exit", []) or []
+                if any(self._evaluate_condition(cond, i) for cond in exits):
                     position = 0
-                    trades.append({'timestamp': self.data['timestamp'][i], 'price': self.data['close'][i], 'side': 'sell'})
+                    trades.append({"timestamp": self.data["timestamp"].iloc[i],
+                                   "price": float(self.data["close"].iloc[i]),
+                                   "side": "sell"})
             elif position == -1:
-                if any(self._evaluate_condition(cond, i) for cond in self.strategy.get('rules', {}).get('sell_condition', {}).get('exit', [])):
-                    self.data.loc[i, 'signal'] = 1
+                exits = sell_rules.get("exit", []) or []
+                if any(self._evaluate_condition(cond, i) for cond in exits):
                     position = 0
-                    trades.append({'timestamp': self.data['timestamp'][i], 'price': self.data['close'][i], 'side': 'buy'})
-            
-            self.data.loc[i, 'position'] = position
-            if i > 0:
-                # 가격 변화를 float으로 계산
-                price_change = float(self.data['close'][i]) - float(self.data['close'][i-1])
-                # float 타입으로 통일하여 최종 equity 계산
-                self.data.loc[i, 'equity'] = self.data.loc[i-1, 'equity'] + self.data.loc[i-1, 'position'] * price_change
+                    trades.append({"timestamp": self.data["timestamp"].iloc[i],
+                                   "price": float(self.data["close"].iloc[i]),
+                                   "side": "buy"})
 
-        self.results['trades'] = trades
-        self.results['equity_curve'] = self.data[['timestamp', 'equity']].to_dict('records')
+            # 2) Entry
+            if position == 0:
+                buy_entries = buy_rules.get("entry", []) or []
+                sell_entries = sell_rules.get("entry", []) or []
+                enter_long = bool(buy_entries) and all(self._evaluate_condition(cond, i) for cond in buy_entries)
+                enter_short = bool(sell_entries) and all(self._evaluate_condition(cond, i) for cond in sell_entries)
 
+                if enter_long:
+                    position = 1
+                    trades.append({"timestamp": self.data["timestamp"].iloc[i],
+                                   "price": float(self.data["close"].iloc[i]),
+                                   "side": "buy"})
+                elif enter_short:
+                    position = -1
+                    trades.append({"timestamp": self.data["timestamp"].iloc[i],
+                                   "price": float(self.data["close"].iloc[i]),
+                                   "side": "sell"})
+
+            # 3) 기록 & 에쿼티
+            self.data.loc[i, "position"] = float(position)
+            price_change = float(self.data["close"].iloc[i] - self.data["close"].iloc[i-1])
+            prev_equity = float(self.data["equity"].iloc[i-1])
+            prev_pos = float(self.data["position"].iloc[i-1])
+            self.data.loc[i, "equity"] = prev_equity + prev_pos * price_change
+
+        self.results["trades"] = trades
+        self.results["equity_curve"] = self.data[["timestamp", "equity"]].to_dict("records")
+
+    def _max_lookback_from_available_columns(self) -> int:
+        """ema.N, bb.N.* 가 존재하면 그 최대 N을 룩백으로 사용"""
+        max_L = 0
+        for col in self.data.columns:
+            m = re.match(r"(ema|bb)\.(\d+)", col)
+            if m:
+                max_L = max(max_L, int(m.group(2)))
+        # 명시된 indicators 기준도 고려
+        for ind in (self.strategy.get("indicators") or []):
+            L = int((ind.get("params", {}) or {}).get("length", 0))
+            max_L = max(max_L, L)
+        return max_L
+
+    # ---------- metrics ----------
     def _calculate_metrics(self):
-        kpi_service = KpiService(
-            pd.Series([item['equity'] for item in self.results['equity_curve']], 
-                      index=pd.to_datetime([item['timestamp'] for item in self.results['equity_curve']])),
-            self.results['trades'], 
-            self.initial_balance
-        )
+        eq = self.results.get("equity_curve", [])
+        equity_series = pd.Series([row["equity"] for row in eq],
+                                  index=pd.to_datetime([row["timestamp"] for row in eq]))
+        kpi_service = KpiService(equity_series, self.results.get("trades", []), self.initial_balance)
         kpis = kpi_service.calculate_kpis()
         self.results.update(kpis)

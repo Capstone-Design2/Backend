@@ -109,6 +109,7 @@
       }
     }
   },
+
   {
     "strategy_name": "볼린저 스퀴즈 돌파 + 밴드워킹",
     "indicators": [
@@ -161,6 +162,26 @@
         "exit": [
           { "type": "crosses_above", "lhs": "close", "rhs": "bb.20.middle" }
         ]
+      }
+    }
+  },
+
+  {
+    "strategy_name": "EMA20 > EMA60 추세 추종 (단순화)",
+    "indicators": [
+      { "key": "ema.20", "type": "ema", "params": { "length": 20 } },
+      { "key": "ema.60", "type": "ema", "params": { "length": 60 } }
+    ],
+    "rules": {
+      "buy_condition": {
+        "entry": [
+          { "type": "compare", "lhs": "ema.20", "op": ">", "rhs": "ema.60" }
+        ],
+        "exit": [{ "type": "compare", "lhs": "ema.20", "op": "<", "rhs": "ema.60" }]
+      },
+      "sell_condition": {
+          "entry": [],
+          "exit": []
       }
     }
   }

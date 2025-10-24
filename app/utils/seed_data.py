@@ -30,7 +30,7 @@ def load_strategies_from_json() -> List[dict]:
 
     try:
         # JSON 파일 경로 설정
-        json_path = Path(__file__).parent.parent / "resource" / "new.json"
+        json_path = Path(__file__).parent / "strategy.json"
 
         with open(json_path, 'r', encoding='utf-8') as f:
             strategies = json.load(f)
