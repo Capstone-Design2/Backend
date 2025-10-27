@@ -153,12 +153,6 @@ async def ingest_intraday_today(
         total += await upsert_price_data(db, buf)
     return total
 
-async def _upsert_rows(db: AsyncSession, rows: Iterable[Dict[str, Any]]) -> int:
-    if not rows:
-        return 0
-    return await upsert_price_data(db, rows)
-
-
 class PriceService:
     def __init__(self):
         self.price_repository = PriceRepository()
@@ -426,3 +420,8 @@ class PriceService:
             })
 
         return rows
+    
+    async def _upsert_rows(db: AsyncSession, rows: Iterable[Dict[str, Any]]) -> int:
+        if not rows:
+            return 0
+        return await upsert_price_data(db, rows)
