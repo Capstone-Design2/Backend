@@ -62,7 +62,7 @@ class UserRepository:
         ID로 사용자를 조회합니다.
         """
         try:
-            result = await db.execute(select(User).where(User.id == user_id))
+            result = await db.execute(select(User).where(User.user_id == user_id))
             user = result.scalars().first()
 
             if user:

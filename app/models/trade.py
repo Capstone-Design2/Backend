@@ -16,7 +16,7 @@ class TradeSide(str, Enum):
 
 class Trade(BaseModel, table=True):
     """
-    공통 거래 로그
+    통합 거래 내역
     - 백테스트 거래 / 실시간 거래 모두 기록
     """
 

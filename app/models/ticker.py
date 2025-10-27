@@ -4,6 +4,10 @@ from sqlalchemy import UniqueConstraint
 from app.models.base import BaseModel
 
 class Ticker(BaseModel, table=True):
+    """
+    종목 정보
+    """
+    
     __tablename__ = "tickers"
     __table_args__ = (
         UniqueConstraint("market", "symbol", name="uq_tickers_market_symbol"),

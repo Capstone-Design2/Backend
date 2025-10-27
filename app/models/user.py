@@ -69,4 +69,4 @@ class User(BaseModel, table=True):
         }
 
     def __repr__(self) -> str:
-        return f"<User(id={self.user_id}, name='{self.name}', email='{self.email}')>"
+        return f"<User(user_id={self.user_id}, name='{self.name}', email='{self.email}')>"

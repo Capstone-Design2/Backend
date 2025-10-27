@@ -1,7 +1,11 @@
 from __future__ import annotations
+
 from typing import Dict, Optional
-from pydantic import BaseModel, Field
-from pydantic import ConfigDict
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.core.config import settings
+
 
 class TickerResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -16,12 +20,6 @@ class TickerResponse(BaseModel):
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
-class TickerSyncRequest(BaseModel):
-    directory: Optional[str] = Field(
-        default=None,
-        example="/path/to/your/project/mnt/data",
-        description="MST 파일들이 있는 디렉터리 경로 (기본: /mnt/data)",
-    )
 
 class TickerSyncResponse(BaseModel):
     total_synced: int

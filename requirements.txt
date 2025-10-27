@@ -1,3 +1,4 @@
+# requirements.txt
 # FastAPI 및 기본 웹 프레임워크
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
@@ -14,7 +15,7 @@ alembic==1.13.1
 # 인증 및 보안
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
-bcrypt==4.0.1
+bcrypt==3.2.2
 python-multipart==0.0.9
 
 # 개발 도구
@@ -28,3 +29,11 @@ mypy==1.7.1
 
 # 로깅 및 모니터링
 python-dotenv==1.0.0
+
+# 데이터 분석 및 조작 라이브러리
+pandas==2.3.3
+
+#금융 API
+yfinance==0.2.66
+pandas-ta==0.4.71b0
+matplotlib==3.9.2

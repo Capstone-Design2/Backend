@@ -1,7 +1,12 @@
+from __future__ import annotations
+
 from typing import Dict, Iterable, List, Final, Literal, Mapping, cast
+from datetime import timedelta
+import asyncio
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
-# 프로토콜에만 의존
+# 프로토콜에만 의존 (구현체 import 금지)
 from app.services.protocols import KISClient, PriceRepository, TickerClient
 from app.utils.timezone import (
     kst_ymd_to_utc_naive,
@@ -17,7 +22,6 @@ Unit   = int
 TF     = Literal["1m", "5m", "15m", "30m", "1h"]
 
 ALLOWED_UNITS: Final[set[int]] = {1, 5, 15, 30, 60}
-
 TF_FROM_UNIT: Final[Mapping[int, TF]] = {1:"1m", 5:"5m", 15:"15m", 30:"30m", 60:"1h"}
 
 # 리샘플 분 목록(필요 시 오버라이드)
@@ -34,6 +38,7 @@ def _ensure_unit(u: int) -> Unit:
         raise ValueError(f"unit must be one of 1,5,15,30,60, got {u!r}")
     return u
 
+# ---- 레코드 변환 ----
 def _to_records_daily(ticker_id: int, items: List[dict]) -> List[dict]:
     out: List[dict] = []
     for it in items:
@@ -50,7 +55,7 @@ def _to_records_intraday(ticker_id: int, items: List[dict], unit: Unit) -> List[
     tf: TF = TF_FROM_UNIT[unit]
     out: List[dict] = []
     for it in items:
-        ts_utc = kst_ymd_hms_to_utc_naive(it["date"], it["time"])
+        ts_utc = kst_ymd_hms_to_utc_naive(it["date"], it["time"])  # KST -> UTC naive
         out.append({
             "ticker_id": ticker_id, "timestamp": ts_utc, "timeframe": tf,
             "open": it.get("open"), "high": it.get("high"),
@@ -59,7 +64,7 @@ def _to_records_intraday(ticker_id: int, items: List[dict], unit: Unit) -> List[
         })
     return out
 
-# ---- 1분 → N분 리샘플 유틸 ----
+# ---- 1분 → N분 리샘플 ----
 def _bucket_key_end(hhmmss: str, mins: int) -> str:
     h = int(hhmmss[0:2]); m = int(hhmmss[2:4])
     end_min = ((m // mins) + 1) * mins
@@ -87,8 +92,7 @@ def _resample_from_1m(items_1m: List[dict], mins: int) -> List[dict]:
             b["volume"] += v
     return list(buckets.values())
 
-# ----------------- 유스케이스 함수들 -----------------
-
+# ----------------- 유스케이스 -----------------
 async def ingest_daily_range(
     db: AsyncSession,
     kis: KISClient,
@@ -108,7 +112,7 @@ async def ingest_daily_range(
         tid = kis_to_tid.get(code)
         if not tid:
             continue
-        items = await kis.get_period_candles(code, start_date, end_date, period=period)
+        items = await kis.get_period_candles(code, start_ymd=start_date, end_ymd=end_date, period=period)
         buf.extend(_to_records_daily(tid, items))
         if len(buf) >= batch:
             total += await repo.upsert_price_data(db, buf)
@@ -174,7 +178,6 @@ async def ingest_intraday_today(
     return total
 
 # ----------------- 삼성전자(005930) 전용: 일봉(3y)+분봉(N개월) -----------------
-
 async def ingest_one_stock_all(
     db: AsyncSession,
     kis: KISClient,
@@ -190,8 +193,7 @@ async def ingest_one_stock_all(
     sleep_intraday_sec: float = 0.15,
 ) -> dict:
     """
-    삼성전자(005930) 일봉(최근 years년) + 분봉(최근 months개월: 1m + 리샘플 5/15/30/60m) 수집 후 upsert.
-    라우터가 아닌 유스케이스 함수이므로 HTTP 상태 대신 ValueError/RuntimeError를 발생시킵니다.
+    삼성전자(005930) 일봉(years년) + 분봉(months개월: 1m + 리샘플 5/15/30/60m) 수집 후 upsert.
     """
     # 1) 종목 식별
     try:
@@ -203,14 +205,14 @@ async def ingest_one_stock_all(
     per_tf: Dict[str, int] = {}
     steps: List[str] = []
 
-    # 2) 일봉: 99일 단위로 분할 호출
+    # 2) 일봉: 99일 단위 분할
     daily_end = today_kst_datetime()
     daily_start = daily_end - timedelta(days=365 * years)
     now_end = daily_end
 
     while now_end >= daily_start:
         now_start = max(daily_start, now_end - timedelta(days=daily_chunk_days))
-        items = await kis.get_period_candles(code, fmt_ymd(now_start), fmt_ymd(now_end), period=period)
+        items = await kis.get_period_candles(code, start_ymd=fmt_ymd(now_start), end_ymd=fmt_ymd(now_end), period=period)
         rows = _to_records_daily(ticker_id, items)
         synced = 0
         if rows:
@@ -223,7 +225,6 @@ async def ingest_one_stock_all(
 
         now_end = now_start - timedelta(days=1)
         if sleep_daily_sec:
-            import asyncio
             await asyncio.sleep(sleep_daily_sec)
 
     # 3) 분봉: 최근 months개월(1m + 리샘플)
@@ -235,7 +236,7 @@ async def ingest_one_stock_all(
         from datetime import timedelta as _td
         while d <= intraday_end - _td(days=1):
             ymd = d.strftime("%Y%m%d")
-            items_1m = await kis.get_intraday_by_date(code, date=ymd, unit=1)  # 1분봉만 요청
+            items_1m = await kis.get_intraday_by_date(code, date=ymd, unit=1)
 
             # 1m 업서트
             rows_1m = _to_records_intraday(ticker_id, items_1m, 1)
@@ -262,7 +263,6 @@ async def ingest_one_stock_all(
 
             await db.commit()
             if sleep_intraday_sec:
-                import asyncio
                 await asyncio.sleep(sleep_intraday_sec)
 
             d += _td(days=1)
@@ -279,6 +279,3 @@ async def ingest_one_stock_all(
         "steps": steps,
         "notes": f"일봉={years}년, 분봉={months}개월(1m 전량 수집 후 리샘플 5/15/30/60m)."
     }
-
-# 필요한 표준 라이브러리 import (위에서 사용)
-from datetime import timedelta

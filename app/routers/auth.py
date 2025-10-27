@@ -34,7 +34,7 @@ async def refresh(
 @router.get("/me")
 async def me(current_user: Annotated[User, Depends(get_current_user)]):
     return {
-        "id": current_user.id,
+        "id": current_user.user_id,
         "email": current_user.email,
         "name": current_user.name,
     }
