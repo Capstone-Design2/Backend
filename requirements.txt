@@ -1,3 +1,4 @@
+# requirements.txt
 # FastAPI 및 기본 웹 프레임워크
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
@@ -34,3 +35,5 @@ pandas==2.3.3
 
 #금융 API
 yfinance==0.2.66
+pandas-ta==0.4.71b0
+matplotlib==3.9.2

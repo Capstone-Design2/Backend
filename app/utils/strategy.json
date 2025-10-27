@@ -82,33 +82,20 @@
         "formula": "(close - ema.20) / ema.20 * 100"
       }
     ],
-    "params": { "entry_dev_abs": 1.0, "exit_dev_abs": 0.5 },
+    "params": { "entry_dev_abs": 0.15, "exit_dev_abs": 0.0 },
     "rules": {
       "buy_condition": {
         "entry": [
-          {
-            "type": "threshold",
-            "lhs": "dev.ema20",
-            "op": "<=",
-            "value": -1.0
-          },
-          { "type": "crosses_above", "lhs": "close", "rhs": "ema.20" }
+          { "type": "threshold", "lhs": "dev.ema20", "op": "<=", "value": -0.15 }
         ],
         "exit": [
-          { "type": "compare", "lhs": "dev.ema20", "op": ">=", "value": 0.5 }
+          { "type": "compare", "lhs": "dev.ema20", "op": ">=", "value": 0.0 }
         ]
       },
-      "sell_condition": {
-        "entry": [
-          { "type": "threshold", "lhs": "dev.ema20", "op": ">=", "value": 1.0 },
-          { "type": "crosses_below", "lhs": "close", "rhs": "ema.20" }
-        ],
-        "exit": [
-          { "type": "compare", "lhs": "dev.ema20", "op": "<=", "value": -0.5 }
-        ]
-      }
+      "sell_condition": { "entry": [], "exit": [] }
     }
   },
+
   {
     "strategy_name": "볼린저 스퀴즈 돌파 + 밴드워킹",
     "indicators": [
@@ -130,18 +117,12 @@
         "formula": "bb.20.middle - shift(bb.20.middle, 1)"
       }
     ],
-    "params": { "sq_thresh": 0.04 },
+    "params": { "sq_thresh": 0.12 },
     "rules": {
       "buy_condition": {
         "entry": [
-          {
-            "type": "threshold",
-            "lhs": "bbwidth.20",
-            "op": "<=",
-            "value": 0.04
-          },
-          { "type": "compare", "lhs": "slope.bb20.mid", "op": ">", "value": 0 },
-          { "type": "crosses_above", "lhs": "close", "rhs": "bb.20.upper" }
+          { "type": "threshold", "lhs": "bbwidth.20", "op": "<=", "value": 0.12 },
+          { "type": "crosses_above", "lhs": "close", "rhs": "bb.20.middle" }
         ],
         "exit": [
           { "type": "crosses_below", "lhs": "close", "rhs": "bb.20.middle" }
@@ -149,14 +130,8 @@
       },
       "sell_condition": {
         "entry": [
-          {
-            "type": "threshold",
-            "lhs": "bbwidth.20",
-            "op": "<=",
-            "value": 0.04
-          },
-          { "type": "compare", "lhs": "slope.bb20.mid", "op": "<", "value": 0 },
-          { "type": "crosses_below", "lhs": "close", "rhs": "bb.20.lower" }
+          { "type": "threshold", "lhs": "bbwidth.20", "op": "<=", "value": 0.12 },
+          { "type": "crosses_below", "lhs": "close", "rhs": "bb.20.middle" }
         ],
         "exit": [
           { "type": "crosses_above", "lhs": "close", "rhs": "bb.20.middle" }
