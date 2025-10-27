@@ -1,7 +1,11 @@
 from datetime import datetime, timezone, timedelta
+from fastapi import HTTPException
+
 from zoneinfo import ZoneInfo
+import re
 
 KST = ZoneInfo("Asia/Seoul")
+DATE_RE = re.compile(r"^\d{8}$")
 
 def kst_ymd_to_utc_naive(yyyymmdd: str) -> datetime:
     dt_kst = datetime.strptime(yyyymmdd, "%Y%m%d").replace(tzinfo=KST)
@@ -37,5 +41,9 @@ def daterange_kst(start: datetime, end: datetime):
         yield cur
         cur += timedelta(days=1)
         
-def _fmt_ymd(dt: datetime) -> str:
+def fmt_ymd(dt: datetime) -> str:
     return dt.strftime("%Y%m%d")
+
+def assert_yyyymmdd(name: str, value: str) -> None:
+    if not DATE_RE.match(value or ""):
+        raise HTTPException(status_code=400, detail=f"{name}는 YYYYMMDD 형식이어야 합니다.")
