@@ -223,3 +223,34 @@ class TickerService:
             raise LookupError(
                 f"해당 종목은 유효한 6자리 kis_code가 없습니다. (symbol={symbol})")
         return tid, kcode
+    
+    async def load_kis_to_ticker_id(self, db: AsyncSession) -> Dict[str, int]:
+        """
+        KIS 6자리 코드 -> ticker_id 매핑을 전부 가져온다.
+        - 삭제되지 않은(is_deleted=False) 종목만
+        - 시장은 ALLOWED_MARKETS만 (KOSPI/KOSDAQ/KONEX)
+        - kis_code가 존재하고 정확히 6자리인 것만
+        """
+        stmt = (
+            select(
+                Ticker.__table__.c.kis_code,
+                Ticker.__table__.c.ticker_id,
+            )
+            .where(
+                Ticker.__table__.c.is_deleted.is_(False),
+                Ticker.__table__.c.market.in_(ALLOWED_MARKETS),
+                Ticker.__table__.c.kis_code.is_not(None),
+                func.length(Ticker.__table__.c.kis_code) == 6,
+            )
+        )
+
+        result = await db.execute(stmt)
+        rows = result.all()
+
+        # 중복 kis_code가 우연히 있을 경우 첫 값만 채택
+        mapping: Dict[str, int] = {}
+        for kis_code, tid in rows:
+            if kis_code and kis_code not in mapping:
+                mapping[kis_code] = tid
+
+        return mapping

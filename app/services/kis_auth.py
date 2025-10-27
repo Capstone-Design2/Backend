@@ -24,7 +24,6 @@ _SKEW = timedelta(minutes=2)
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
-
 class KISAuthManager:
     """KIS API 인증 토큰을 관리하는 싱글톤 클래스"""
 
