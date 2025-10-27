@@ -58,6 +58,7 @@ Backend/
 │   │   ├── kis_auth.py         # KIS 인증 헬퍼(저수준 유틸)
 │   │   ├── logger.py           # 로깅 설정/헬퍼
 │   │   ├── mst_parser.py       # 주식 데이터 파일 parsing 정규식
+│   │   ├── resample.py         # 1분봉 데이터를 리샘플링하는 유틸
 │   │   ├── router.py           # 라우터 공통 유틸
 │   │   ├── router_utils.py     # 라우터 부가 유틸(에러/응답 포맷) ← 추가
 │   │   ├── security.py         # 해시/검증, JWT 유틸, OAuth2 스킴
