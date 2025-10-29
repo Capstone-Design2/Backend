@@ -287,12 +287,14 @@ class PriceService:
             return 0
         return await self.price_repository.upsert_price_data(db, rows)
     
-    def _ensure_period(self,p: str) -> Period:
+    @staticmethod
+    def _ensure_period(p: str) -> Period:
         if p not in ("D", "W", "M", "Y"):
             raise ValueError(f"period must be one of 'D','W','M','Y', got {p!r}")
         return cast(Period, p)
 
-    def _to_records_daily(self,ticker_id: int, items: List[dict]) -> List[dict]:
+    @staticmethod
+    def _to_records_daily(ticker_id: int, items: List[dict]) -> List[dict]:
         out: List[dict] = []
         for it in items:
             ts_utc = kst_ymd_to_utc_naive(it["date"])  # YYYYMMDD -> UTC naive
