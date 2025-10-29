@@ -73,7 +73,7 @@ async def sync_intraday_today(
 
 @router.post(
     "/one/all",
-    summary="삼성전자 일봉(3년)+분봉(1개월) 데이터 동기화 (KIS)",
+    summary="삼성전자 일봉(x년)+분봉(y개월) 데이터 동기화 (KIS)",
     description="""
     삼성전자 일봉(x년)+분봉(y개월) 데이터를 수집하고 price_data 테이블에 upsert합니다.
     """
