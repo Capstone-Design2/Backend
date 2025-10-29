@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 from datetime import timedelta
 from typing import (Any, Dict, Final, Iterable, List, Literal, Mapping, cast)
@@ -8,11 +10,11 @@ import yfinance
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.repositories.price import PriceRepository, upsert_price_data
+from app.repositories.price import PriceRepository
 from app.repositories.ticker import TickerRepository
 from app.schemas.price import YfinanceRequest
 from app.services.kis_prices import KISPrices
-from app.utils.timezone import daterange_kst, fmt_ymd, kst_ymd_hms_to_utc_naive, kst_ymd_to_utc_naive, months_ago_kst, today_kst_datetime
+from app.utils.timezone import daterange_kst, fmt_ymd, kst_ymd_to_utc_naive, months_ago_kst, today_kst_datetime
 from app.utils.resample import resample_from_1m, rows_from_items
 
 # ---- 타입 별칭 ----
@@ -32,127 +34,6 @@ TF_FROM_UNIT: Final[Mapping[int, TF]] = {
     60: "1h",
 }
 
-# ---- 런타임 검증 유틸 ----
-def _ensure_period(p: str) -> Period:
-    if p not in ("D", "W", "M", "Y"):
-        raise ValueError(f"period must be one of 'D','W','M','Y', got {p!r}")
-    return cast(Period, p)
-
-
-def _ensure_unit(u: int) -> Unit:
-    if u not in ALLOWED_UNITS:
-        raise ValueError(f"unit must be one of 1,5,15,30,60, got {u!r}")
-    return u
-
-
-def _to_records_daily(ticker_id: int, items: List[dict]) -> List[dict]:
-    out: List[dict] = []
-    for it in items:
-        ts_utc = kst_ymd_to_utc_naive(it["date"])  # YYYYMMDD -> UTC naive
-        out.append({
-            "ticker_id": ticker_id, "timestamp": ts_utc, "timeframe": "1D",
-            "open": it.get("open"), "high": it.get("high"),
-            "low": it.get("low"), "close": it.get("close"),
-            "volume": it.get("volume"), "source": "KIS", "is_adjusted": False,
-        })
-    return out
-
-
-def _to_records_intraday(ticker_id: int, items: List[dict], unit: Unit) -> List[dict]:
-    tf: TF = TF_FROM_UNIT[unit]
-    out: List[dict] = []
-    for it in items:
-        ts_utc = kst_ymd_hms_to_utc_naive(
-            it["date"], it["time"])  # KST -> UTC naive
-        out.append({
-            "ticker_id": ticker_id, "timestamp": ts_utc, "timeframe": tf,
-            "open": it.get("open"), "high": it.get("high"),
-            "low": it.get("low"), "close": it.get("close"),
-            "volume": it.get("volume"), "source": "KIS", "is_adjusted": False,
-        })
-    return out
-
-
-async def ingest_daily_range(
-    db,
-    kis: KISPrices,
-    kis_to_tid: Dict[str, int],
-    kis_codes: Iterable[str],
-    start_date: str,
-    end_date: str,
-    period: Period = "D",     # <- Literal로 좁힘
-    batch: int = 2000,
-) -> int:
-    total = 0
-    buf: List[dict] = []
-    period = _ensure_period(period)
-
-    for code in kis_codes:
-        tid = kis_to_tid.get(code)
-        if not tid:
-            continue
-        items = await kis.get_period_candles(code, start_date, end_date, period=period)
-        buf.extend(_to_records_daily(tid, items))
-        if len(buf) >= batch:
-            total += await upsert_price_data(db, buf)
-            buf.clear()
-    if buf:
-        total += await upsert_price_data(db, buf)
-    return total
-
-
-async def ingest_intraday_by_date(
-    db,
-    kis: KISPrices,
-    kis_to_tid: Dict[str, int],
-    kis_codes: Iterable[str],
-    date: str,
-    unit: Unit = 1,           # <- Literal로 좁힘
-    batch: int = 2000,
-) -> int:
-    total = 0
-    buf: List[dict] = []
-    unit = _ensure_unit(unit)
-
-    for code in kis_codes:
-        tid = kis_to_tid.get(code)
-        if not tid:
-            continue
-        items = await kis.get_intraday_by_date(code, date, unit=unit)
-        buf.extend(_to_records_intraday(tid, items, unit))
-        if len(buf) >= batch:
-            total += await upsert_price_data(db, buf)
-            buf.clear()
-    if buf:
-        total += await upsert_price_data(db, buf)
-    return total
-
-
-async def ingest_intraday_today(
-    db,
-    kis: KISPrices,
-    kis_to_tid: Dict[str, int],
-    kis_codes: Iterable[str],
-    unit: Unit = 1,           # <- Literal로 좁힘
-    batch: int = 2000,
-) -> int:
-    total = 0
-    buf: List[dict] = []
-    unit = _ensure_unit(unit)
-
-    for code in kis_codes:
-        tid = kis_to_tid.get(code)
-        if not tid:
-            continue
-        items = await kis.get_intraday_today(code, unit=unit)
-        buf.extend(_to_records_intraday(tid, items, unit))
-        if len(buf) >= batch:
-            total += await upsert_price_data(db, buf)
-            buf.clear()
-    if buf:
-        total += await upsert_price_data(db, buf)
-    return total
-
 class PriceService:
     def __init__(self):
         self.price_repository = PriceRepository()
@@ -163,79 +44,148 @@ class PriceService:
     async def sync_daily_prices(
         self,
         db: AsyncSession,
-        start_date: str, 
-        end_date: str, *, 
-        period: Period = "D"
+        start_date: str,
+        end_date: str, *,
+        period: Period = "D",
     ) -> dict:
+        # 입력 검증
+        if start_date > end_date:
+            raise HTTPException(status_code=400, detail="start_date must be <= end_date")
+
+        # 티커 매핑
         kis_to_tid = await self.ticker_client.load_kis_to_ticker_id(db)
-        count = await ingest_daily_range(
-            db, self.kis_client, self.price_repository, kis_to_tid, kis_to_tid.keys(), start_date, end_date, period=period
-        )
-        
-        await db.commit()
-        return {"synced": count, "timeframe": "1D"}
-    
+        if not kis_to_tid:
+            return {"synced": 0, "timeframe": "1D", "notes": "no tickers"}
+
+        try:
+            count = await self.ingest_daily_range(
+                db=db,
+                kis_to_tid=kis_to_tid,
+                kis_codes=kis_to_tid.keys(),
+                start_date=start_date,
+                end_date=end_date,
+                period=period,
+                batch=2000,
+            )
+            await db.commit()
+        except Exception as e:
+            await db.rollback()
+            raise
+
+        return {
+            "synced": count,
+            "timeframe": "1D",
+            "notes": f"KIS 일봉 {start_date}~{end_date} ({period})",
+        }
+
     async def sync_intraday_by_date(
         self,
         db: AsyncSession,
         date: str,
     ) -> dict:
+        """
+        지정된 날짜의 모든 KIS 종목에 대해 1분봉 및 리샘플(5/15/30/60m) 데이터를 수집 후 업서트.
+        """
         kis_to_tid = await self.ticker_client.load_kis_to_ticker_id(db)
+        if not kis_to_tid:
+            return {"synced": 0, "notes": "no tickers"}
+
         total_synced = 0
         per_tf: Dict[str, int] = {}
         steps: List[str] = []
 
-        for code, ticker_id in kis_to_tid.items():
-            # 1분 전량 수집
-            items_1m = await self.kis_client.get_intraday_by_date(code, date=date)
-            rows_1m = rows_from_items(ticker_id, items_1m, "1m")
-            s1 = await _upsert_rows(db, rows_1m)
-            total_synced += s1
-            per_tf["1m"] = per_tf.get("1m", 0) + s1
-            steps.append(f"Past {date} (1m/1m): {s1}")
+        try:
+            for code, ticker_id in kis_to_tid.items():
+                # ① 1분 데이터 수집
+                items_1m = await self.kis_client.get_intraday_by_date(code, date=date)
+                if not items_1m:
+                    steps.append(f"{code}({ticker_id}) - no 1m data on {date}")
+                    continue
 
-            # 리샘플링들
-            for mins in RESAMPLE_MINUTES:
-                tf = f"{mins}m" if mins < 60 else "1h"
-                derived = resample_from_1m(items_1m, mins)
-                rows_tf = rows_from_items(ticker_id, derived, tf)
-                s = await _upsert_rows(db, rows_tf)
-                total_synced += s
-                per_tf[tf] = per_tf.get(tf, 0) + s
-                steps.append(f"Past {date} ({mins}m/{tf}): {s}")
+                rows_1m = rows_from_items(ticker_id, items_1m, "1m")
+                s1 = await self._upsert_rows(db, rows_1m)
+                total_synced += s1
+                per_tf["1m"] = per_tf.get("1m", 0) + s1
+                steps.append(f"{code}({ticker_id}) {date} [1m]: {s1} rows")
 
-        await db.commit()
-        return {"synced": total_synced, "synced_by_timeframe": per_tf, "steps": steps}
+                # ② 리샘플 파생 데이터 생성 및 업서트
+                for mins in RESAMPLE_MINUTES:
+                    tf = f"{mins}m" if mins < 60 else "1h"
+                    derived = resample_from_1m(items_1m, mins)
+                    if not derived:
+                        continue
+                    rows_tf = rows_from_items(ticker_id, derived, tf)
+                    s = await self._upsert_rows(db, rows_tf)
+                    total_synced += s
+                    per_tf[tf] = per_tf.get(tf, 0) + s
+                    steps.append(f"{code}({ticker_id}) {date} [{tf}]: {s} rows")
+
+            await db.commit()
+
+        except Exception as e:
+            await db.rollback()
+            raise HTTPException(status_code=500, detail=f"Intraday sync failed: {str(e)}")
+
+        return {
+            "date": date,
+            "synced_total": total_synced,
+            "synced_by_timeframe": per_tf,
+            "steps": steps,
+        }
 
     async def sync_intraday_today(
         self,
         db: AsyncSession,
     ) -> dict:
+        """
+        오늘자 모든 KIS 종목에 대해 1분봉 및 리샘플(5/15/30/60m) 데이터를 수집 후 업서트.
+        """
         kis_to_tid = await self.ticker_client.load_kis_to_ticker_id(db)
+        if not kis_to_tid:
+            return {"synced": 0, "notes": "no tickers"}
 
         total_synced = 0
         per_tf: Dict[str, int] = {}
         steps: List[str] = []
-    
-        for code, ticker_id in kis_to_tid.items():
-            items_1m = await self.kis_client.get_intraday_today(code)
-            rows_1m = rows_from_items(ticker_id, items_1m, "1m")
-            s1 = await _upsert_rows(db, rows_1m)
-            total_synced += s1
-            per_tf["1m"] = per_tf.get("1m", 0) + s1
-            steps.append(f"Today (1m/1m): {s1}")
 
-            for mins in RESAMPLE_MINUTES:
-                tf = f"{mins}m" if mins < 60 else "1h"
-                derived = resample_from_1m(items_1m, mins)
-                rows_tf = rows_from_items(ticker_id, derived, tf)
-                s = await _upsert_rows(db, rows_tf)
-                total_synced += s
-                per_tf[tf] = per_tf.get(tf, 0) + s
-                steps.append(f"Today ({mins}m/{tf}): {s}")
+        try:
+            for code, ticker_id in kis_to_tid.items():
+                # ① 오늘자 1분봉 수집
+                items_1m = await self.kis_client.get_intraday_today(code)
+                if not items_1m:
+                    steps.append(f"{code}({ticker_id}) - no 1m data today")
+                    continue
 
-        await db.commit()
-        return {"synced": total_synced, "synced_by_timeframe": per_tf, "steps": steps}
+                rows_1m = rows_from_items(ticker_id, items_1m, "1m")
+                s1 = await self._upsert_rows(db, rows_1m)
+                total_synced += s1
+                per_tf["1m"] = per_tf.get("1m", 0) + s1
+                steps.append(f"{code}({ticker_id}) Today [1m]: {s1} rows")
+
+                # ② 리샘플 파생 데이터 생성 및 업서트
+                for mins in RESAMPLE_MINUTES:
+                    tf = f"{mins}m" if mins < 60 else "1h"
+                    derived = resample_from_1m(items_1m, mins)
+                    if not derived:
+                        continue
+                    rows_tf = rows_from_items(ticker_id, derived, tf)
+                    s = await self._upsert_rows(db, rows_tf)
+                    total_synced += s
+                    per_tf[tf] = per_tf.get(tf, 0) + s
+                    steps.append(f"{code}({ticker_id}) Today [{tf}]: {s} rows")
+
+            await db.commit()
+
+        except Exception as e:
+            await db.rollback()
+            raise HTTPException(status_code=500, detail=f"Intraday(today) sync failed: {str(e)}")
+
+        return {
+            "synced_total": total_synced,
+            "synced_by_timeframe": per_tf,
+            "steps": steps,
+        }
+
     
     async def ingest_one_stock_all(
         self,
@@ -276,7 +226,7 @@ class PriceService:
                 )
 
                 daily_rows = rows_from_items(ticker_id, daily_items, "1D")
-                synced = await _upsert_rows(db, daily_rows)
+                synced = await self._upsert_rows(db, daily_rows)
                 await db.commit()
 
                 per_tf["1D"] = per_tf.get("1D", 0) + synced
@@ -301,7 +251,7 @@ class PriceService:
                 items_1m = await kis.get_intraday_by_date(code, date=ymd)
 
                 rows_1m = rows_from_items(ticker_id, items_1m, "1m")
-                s1 = await _upsert_rows(db, rows_1m)
+                s1 = await self._upsert_rows(db, rows_1m)
                 per_tf["1m"] = per_tf.get("1m", 0) + s1
                 total += s1
                 steps.append(f"1m {ymd}: {s1}")
@@ -312,7 +262,7 @@ class PriceService:
                         tf = f"{mins}m" if mins < 60 else "1h"
                         derived = resample_from_1m(items_1m, mins)
                         rows_tf = rows_from_items(ticker_id, derived, tf)
-                        s = await _upsert_rows(db, rows_tf)
+                        s = await self._upsert_rows(db, rows_tf)
                         per_tf[tf] = per_tf.get(tf, 0) + s
                         total += s
                         steps.append(f"{tf} {ymd}: {s}")
@@ -329,8 +279,84 @@ class PriceService:
             "synced_total": total,
             "synced_by_timeframe": per_tf,
             "steps": steps,
-            "notes": f"일봉={years}년, 분봉={months}개월(1m 전량 수집 후 리샘플 5/15/30/60m)."
+            "notes": f"일봉={years}년, 분봉={months}개월(1m 전량 수집 후 리샘플 1/5/15/30/60m)."
         }
+        
+    async def _upsert_rows(self, db: AsyncSession, rows: Iterable[Dict[str, Any]]) -> int:
+        if not rows:
+            return 0
+        return await self.price_repository.upsert_price_data(db, rows)
+    
+    def _ensure_period(self,p: str) -> Period:
+        if p not in ("D", "W", "M", "Y"):
+            raise ValueError(f"period must be one of 'D','W','M','Y', got {p!r}")
+        return cast(Period, p)
+
+    def _to_records_daily(self,ticker_id: int, items: List[dict]) -> List[dict]:
+        out: List[dict] = []
+        for it in items:
+            ts_utc = kst_ymd_to_utc_naive(it["date"])  # YYYYMMDD -> UTC naive
+            out.append({
+                "ticker_id": ticker_id, "timestamp": ts_utc, "timeframe": "1D",
+                "open": it.get("open"), "high": it.get("high"),
+                "low": it.get("low"), "close": it.get("close"),
+                "volume": it.get("volume"), "source": "KIS", "is_adjusted": False,
+            })
+        return out
+
+    async def ingest_daily_range(
+        self,
+        db: AsyncSession,
+        kis_to_tid: Dict[str, int],
+        kis_codes: Iterable[str],
+        start_date: str,
+        end_date: str,
+        period: Period = "D",
+        batch: int = 2000,
+    ) -> int:
+        if batch <= 0:
+            raise ValueError("batch must be > 0")
+        period = self._ensure_period(period)
+
+        def _chunks(start_dt, end_dt, max_days: int = 99):
+            cur_end = end_dt
+            while cur_end >= start_dt:
+                cur_start = max(start_dt, cur_end - timedelta(days=max_days - 1))
+                yield cur_start, cur_end
+                cur_end = cur_start - timedelta(days=1)
+
+        from datetime import datetime as _dt
+        s_dt = _dt.strptime(start_date, "%Y%m%d")
+        e_dt = _dt.strptime(end_date, "%Y%m%d")
+
+        total = 0
+        buf: List[dict] = []
+
+        for code in kis_codes:
+            tid = kis_to_tid.get(code)
+            if not tid:
+                continue
+
+            for chunk_start, chunk_end in _chunks(s_dt, e_dt, 99):
+                items = await self.kis_client.get_period_candles(
+                    code,
+                    fmt_ymd(chunk_start),
+                    fmt_ymd(chunk_end),
+                    period=period,
+                )
+                buf.extend(self._to_records_daily(tid, items))
+
+                if len(buf) >= batch:
+                    total += await self.price_repository.upsert_price_data(db, buf)
+                    buf = []
+
+                await asyncio.sleep(0.08)
+
+        if buf:
+            total += await self.price_repository.upsert_price_data(db, buf)
+
+        return total
+
 
     
     async def update_price_from_yfinance(
@@ -371,7 +397,7 @@ class PriceService:
                 ticker.ticker_id, request.interval, df)
 
             # 4. DB 저장
-            update_len = await upsert_price_data(db, rows)
+            update_len = await self.price_repository.upsert_price_data(db, rows)
             await db.commit()
 
             return f"Successfully updated {request.ticker_name} from yfinance, updated {update_len} rows"
@@ -420,8 +446,3 @@ class PriceService:
             })
 
         return rows
-    
-    async def _upsert_rows(db: AsyncSession, rows: Iterable[Dict[str, Any]]) -> int:
-        if not rows:
-            return 0
-        return await upsert_price_data(db, rows)

@@ -20,6 +20,7 @@ if not KIS_APP_KEY or not KIS_APP_SECRET:
     )
 
 _SKEW = timedelta(minutes=2)
+KST = timezone(timedelta(hours=9))
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -81,7 +82,7 @@ class KISAuthManager:
                 # 문서별로 KST인 경우가 있어 보수적으로 UTC로 파싱 후 스큐로 보호
                 try:
                     # 기본 포맷 가정
-                    dt = datetime.strptime(expire_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                    dt = datetime.strptime(expire_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=KST)
                 except Exception:
                     dt = utc_now() + timedelta(hours=24)
                 expires_at = dt
@@ -90,7 +91,7 @@ class KISAuthManager:
 
         self._access_token = token
         # 안전 스큐 적용(조기 갱신)
-        self._token_expires_at = expires_at - _SKEW
+        self._token_expires_at = expires_at
         logger.info("KIS 토큰 발급 완료. 만료(스큐 적용 후): %s", self._token_expires_at.isoformat())
 
 
