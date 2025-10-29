@@ -2,12 +2,12 @@ from decimal import Decimal
 from typing import Any, Dict, Iterable, List
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, select, asc
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.price_data import PriceData
-from datetime import date
+from datetime import date, datetime
 
 class PriceRepository:
     async def upsert_price_data(self, db: AsyncSession, rows: Iterable[Dict[str, Any]]) -> int:
@@ -69,6 +69,30 @@ class PriceRepository:
             )
             .order_by(PriceData.timestamp)
         )
+        result = await db.execute(stmt)
+        return result.scalars().all()
+    
+    async def get_price_data_front(
+        self,
+        ticker_id: int,
+        start: datetime,
+        end: datetime,
+        timeframe: str,
+        adjusted: bool,
+        db: AsyncSession,
+    ) -> List[PriceData]:
+        stmt = (
+            select(PriceData)
+            .where(
+                PriceData.ticker_id == ticker_id,
+                PriceData.timestamp >= start,
+                PriceData.timestamp < end,
+                PriceData.timeframe == timeframe,
+                PriceData.is_adjusted == adjusted,
+            )
+            .order_by(asc(PriceData.timestamp))
+        )
+
         result = await db.execute(stmt)
         return result.scalars().all()
     
