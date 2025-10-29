@@ -13,6 +13,7 @@ from .price import router as price_router
 from .strategy import router as strategy_router
 from .ticker import router as ticker_router
 from .user import router as user_router
+from .tradingview import router as tradingview_router
 
 __all__ = [
     "user_router",
@@ -20,6 +21,7 @@ __all__ = [
     "auth_router",
     "price_router",
     "strategy_router",
+    "tradingview_router",
 ]
 
 

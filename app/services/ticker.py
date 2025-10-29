@@ -33,7 +33,8 @@ class TickerService:
         self.auth = auth_manager
         self.ticker_repository = TickerRepository()
 
-    def _guess_market_from_filename(self, filename: str) -> Optional[str]:
+    @staticmethod
+    def _guess_market_from_filename(filename: str) -> Optional[str]:
         """
         파일명으로 시장을 추정한다.
         - kospi_code.mst.zip / nxt_kospi_code.mst.zip -> KOSPI
@@ -50,7 +51,8 @@ class TickerService:
             return "KONEX"
         return None
 
-    def _safe_name(self, name: Optional[str], limit: int = 100) -> Optional[str]:
+    @staticmethod
+    def _safe_name(name: Optional[str], limit: int = 100) -> Optional[str]:
         if not name:
             return None
         name = name.strip()
@@ -58,11 +60,13 @@ class TickerService:
             name = name[:limit]
         return name
 
-    def _compose_symbol_from_pdno(self, pdno: str, market: str) -> str:
+    @staticmethod
+    def _compose_symbol_from_pdno(pdno: str, market: str) -> str:
         suf = SYMBOL_SUFFIX.get(market, market.upper())
         return f"{pdno}.{suf}"
-
-    def _derive_kis_code_from_pdno(self, pdno: str) -> Optional[str]:
+    
+    @staticmethod
+    def _derive_kis_code_from_pdno(pdno: str) -> Optional[str]:
         return pdno if SIX_DIGIT.match(pdno) else None
 
     async def _upsert_batch(self, db: AsyncSession, rows: List[dict]) -> int:
