@@ -83,22 +83,22 @@ class _RateLimiter:
     def __init__(self, rps: int, concurrency: int):
         self.rps = max(1, rps)
         self.window = deque()
-        self.lock = asyncio.Semaphore(max(1, concurrency))
+        self.sem = asyncio.Semaphore(max(1, concurrency))
 
-    async def acquire(self):
-        await self.lock.acquire()
-        try:
-            while True:
-                now = time.monotonic()
-                while self.window and now - self.window[0] > 1.0:
-                    self.window.popleft()
-                if len(self.window) < self.rps:
-                    self.window.append(now)
-                    return
-                sleep_for = 1.0 - (now - self.window[0])
-                await asyncio.sleep(max(0.01, sleep_for))
-        finally:
-            self.lock.release()
+    async def __aenter__(self):
+        await self.sem.acquire()
+        # RPS 토큰 버킷
+        while True:
+            now = time.monotonic()
+            while self.window and now - self.window[0] > 1.0:
+                self.window.popleft()
+            if len(self.window) < self.rps:
+                self.window.append(now)
+                break
+            await asyncio.sleep(max(0.01, 1.0 - (now - self.window[0])))
+
+    async def __aexit__(self, exc_type, exc, tb):
+        self.sem.release()
 
 # =========================
 # TR ID (실전/모의에 맞게 교체)
@@ -167,52 +167,69 @@ class KISPrices:
 
         last_err = None
         for attempt in range(1, KIS_RETRY_MAX + 1):
-            await self._limiter.acquire()
-
-            resp = await client.get(path, params=params)
-            text = resp.text
-            status = resp.status_code
-
-            if 200 <= status < 300:
+            async with self._limiter:
+                # ❶ 전송 계층 예외도 재시도
                 try:
-                    j = resp.json()
-                except Exception:
-                    return {"raw": text}
-
-                rt_cd = (j.get("rt_cd") or j.get("rtcd") or "").strip()
-                if rt_cd in ("", "0"):
-                    return j
-
-                msg_cd = (j.get("msg_cd") or j.get("msgcd") or "").strip()
-                if msg_cd in {"EGW00201", "EGW00202"}:
+                    resp = await client.get(path, params=params)
+                except (httpx.ReadError,
+                        httpx.RemoteProtocolError,
+                        httpx.ConnectError,
+                        httpx.PoolTimeout,
+                        httpx.ReadTimeout,
+                        httpx.WriteError) as e:
                     backoff = (KIS_BACKOFF_BASE * (2 ** (attempt - 1))) + random.uniform(*KIS_BACKOFF_JITTER)
+                    last_err = (type(e).__name__, str(e))
                     await asyncio.sleep(backoff)
-                    last_err = (status, msg_cd, text)
                     continue
 
-                raise RuntimeError({
-                    "where": "KIS_GET(rt_cd!=0)",
-                    "status": status,
-                    "msg_cd": msg_cd,
-                    "text": text[:600],
-                    "url": str(resp.request.url),
-                    "params": params,
-                })
+                text = resp.text
+                status = resp.status_code
 
-            try:
-                j = json.loads(text)
-                msg_cd = (j.get("msg_cd") or "").strip()
-            except Exception:
-                j = None
-                msg_cd = ""
+                # ❷ 성공(2xx)
+                if 200 <= status < 300:
+                    try:
+                        j = resp.json()
+                    except Exception:
+                        return {"raw": text}
 
-            if msg_cd in {"EGW00201", "EGW00202"}:
-                backoff = (KIS_BACKOFF_BASE * (2 ** (attempt - 1))) + random.uniform(*KIS_BACKOFF_JITTER)
-                await asyncio.sleep(backoff)
-                last_err = (status, msg_cd, text)
-                continue
+                    rt_cd = (j.get("rt_cd") or j.get("rtcd") or "").strip()
+                    if rt_cd in ("", "0"):
+                        return j
 
-            resp.raise_for_status()
+                    msg_cd = (j.get("msg_cd") or j.get("msgcd") or "").strip()
+                    # KIS 게이트웨이 혼잡(재시도)
+                    if msg_cd in {"EGW00201", "EGW00202"}:
+                        backoff = (KIS_BACKOFF_BASE * (2 ** (attempt - 1))) + random.uniform(*KIS_BACKOFF_JITTER)
+                        await asyncio.sleep(backoff)
+                        last_err = (status, msg_cd, text[:300])
+                        continue
+
+                    # 성공코드가 아닌 정상응답 → 오류로 처리
+                    raise RuntimeError({
+                        "where": "KIS_GET(rt_cd!=0)",
+                        "status": status,
+                        "msg_cd": msg_cd,
+                        "text": text[:600],
+                        "url": str(resp.request.url),
+                        "params": params,
+                    })
+
+                # ❸ 비2xx: 429/5xx는 백오프 재시도
+                try:
+                    j = json.loads(text)
+                    msg_cd = (j.get("msg_cd") or j.get("msgcd") or "").strip()
+                except Exception:
+                    j = None
+                    msg_cd = ""
+
+                if status == 429 or 500 <= status < 600 or msg_cd in {"EGW00201", "EGW00202"}:
+                    backoff = (KIS_BACKOFF_BASE * (2 ** (attempt - 1))) + random.uniform(*KIS_BACKOFF_JITTER)
+                    await asyncio.sleep(backoff)
+                    last_err = (status, msg_cd or f"HTTP {status}", text[:300])
+                    continue
+
+                # 그 외는 즉시 예외
+                resp.raise_for_status()
 
         # 재시도 모두 실패
         raise RuntimeError({
@@ -221,6 +238,7 @@ class KISPrices:
             "url": f"{self._base_url}{path}",
             "params": params,
         })
+
 
     # ========== 1) 일/주/월/년 ==========
     async def get_period_candles(
