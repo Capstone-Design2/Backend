@@ -1,6 +1,10 @@
 # app/services/backtest.py
+from __future__ import annotations
+
+import logging
 import re
-from typing import Dict, List, Any, Optional, Set, Tuple
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 import pandas as pd
@@ -8,8 +12,32 @@ import pandas_ta as ta
 
 from app.services.kpi_service import KpiService
 
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class Trade:
+    timestamp: pd.Timestamp
+    price: float
+    side: str  # "buy" | "sell"
+
 
 class BacktestService:
+    """
+    단일 종목 시계열에 대해 (룰 기반) 백테스트를 수행합니다.
+
+    입력
+    - strategy: Dict (indicators/derived/rules 스키마)
+    - data:     pd.DataFrame: columns ⊇ ["timestamp","open","high","low","close","volume"]
+
+    출력 (self.run)
+    - Dict[str, Any]:
+        {
+          "trades": List[Dict[str,Any]],
+          "equity_curve": List[{"timestamp": ..., "equity": ...}],
+          ... (KpiService.calculate_kpis() 결과 포함)
+        }
+    """
     def __init__(self, strategy: Dict[str, Any], data: pd.DataFrame):
         self.strategy = strategy or {}
         self.data = data.copy()
@@ -21,133 +49,129 @@ class BacktestService:
         if not isinstance(self.data, pd.DataFrame) or len(self.data) < 2:
             return {"error": "Not enough data to run backtest"}
 
-        # 정렬 및 기본 전처리
+        self._prep_dataframe()
+
+        # 지표 요구사항을 rules/derived에서 추론 → 누락분 계산 → 명시분 계산
+        needed = self._infer_needed_indicators_from_rules_and_derived()
+        self._compute_missing_inferred_indicators(needed)
+        self._calculate_indicators()  # 명시된 indicators/derived 처리
+
+        # 거래 실행 및 성과 계산
+        self._execute_trades()
+        self._calculate_metrics()
+        return self.results
+
+    # ---------- basic prep ----------
+    def _prep_dataframe(self) -> None:
+        """타임스탬프 정렬, 수치형 캐스팅 등 공통 전처리."""
         if "timestamp" in self.data.columns:
-            self.data["timestamp"] = pd.to_datetime(self.data["timestamp"])
-            self.data = self.data.sort_values("timestamp").reset_index(drop=True)
+            self.data["timestamp"] = pd.to_datetime(self.data["timestamp"], errors="coerce")
+            self.data = self.data.dropna(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+        else:
+            raise ValueError("Input data must contain 'timestamp' column")
 
         for c in ("open", "high", "low", "close", "volume"):
             if c in self.data.columns:
                 self.data[c] = pd.to_numeric(self.data[c], errors="coerce")
 
-        self._calculate_indicators()
-        self._execute_trades()
-        self._calculate_metrics()
-        return self.results
+        # 혹시 존재한다면 이전 결과 컬럼 제거(깨끗한 상태 보장)
+        for col in ("signal", "position", "equity"):
+            if col in self.data.columns:
+                self.data.drop(columns=[col], inplace=True)
 
-    def _calculate_indicators(self):
-        # 1) 기본 지표 계산
-        for ind in self.strategy.get("indicators", []):
-            t = ind["type"]
-            k = ind["key"]
-            p = ind.get("params", {})
+    # ---------- indicators & derived ----------
+    def _calculate_indicators(self) -> None:
+        """
+        1) indicators 섹션 계산 (EMA, BBANDS 등)
+        2) derived 섹션 계산 (수식/shift 지원, 점(.) 포함 컬럼명 안전 평가)
+        """
+        # 1) 기본 지표
+        for ind in self.strategy.get("indicators", []) or []:
+            t = (ind.get("type") or "").lower()
+            k = ind.get("key")
+            p = ind.get("params", {}) or {}
 
-            if t == "ema":
-                self.data[k] = ta.ema(self.data["close"], length=p.get("length", 20))
-
-            elif t == "bollinger_bands":
-                bb = ta.bbands(
-                    self.data["close"],
-                    length=p.get("length", 20),
-                    std=p.get("stddev", 2),   # json은 stddev, pandas-ta는 std
-                )
-                # ⬇️ 열 이름을 안전하게 매핑 (버전별 명칭 차이 대응)
-                def first_col(prefix):
-                    return next((c for c in bb.columns if str(c).startswith(prefix)), None)
-
-                lower_col  = first_col("BBL_") or first_col("BBL")
-                middle_col = first_col("BBM_") or first_col("BBM")
-                upper_col  = first_col("BBU_") or first_col("BBU")
-
-                if lower_col is None or middle_col is None or upper_col is None:
-                    raise RuntimeError(f"Unexpected BBANDS columns: {list(bb.columns)}")
-
-                self.data[f"{k}.lower"]  = bb[lower_col]
-                self.data[f"{k}.middle"] = bb[middle_col]
-                self.data[f"{k}.upper"]  = bb[upper_col]
-
-        # 2) 파생 지표 계산 (점(.) 컬럼명 & shift() 지원)
-        def _safe_eval(formula: str) -> str:
-            # 컬럼명이 식별자 규칙을 어기면 backtick으로 감쌉니다.
-            cols = sorted(self.data.columns.tolist(), key=len, reverse=True)
-            safe = formula
-            for col in cols:
-                # 이미 backtick으로 감싸진 경우는 건너뜀
-                if f"`{col}`" in safe:
-                    continue
-                # 정규식으로 정확히 해당 토큰만 치환
-                safe = re.sub(rf'(?<![`"\w]){re.escape(col)}(?![`"\w])', f"`{col}`", safe)
-            return safe
-
-        for drv in self.strategy.get("derived", []):
-            key = drv["key"]
-            formula = drv.get("formula")
-            if not formula:
+            if not k:
+                logger.debug("Indicator without key skipped: %s", ind)
                 continue
 
             try:
-                if "shift(" in formula:
-                    # 아주 단순한 형태:  foo - shift(foo, 1)
-                    m = re.match(r'^\s*([A-Za-z0-9._]+)\s*-\s*shift\(\s*([A-Za-z0-9._]+)\s*,\s*(\d+)\s*\)\s*$', formula)
-                    if m:
-                        a, b, n = m.group(1), m.group(2), int(m.group(3))
-                        self.data[key] = self.data[a] - self.data[b].shift(n)
-                    else:
-                        # 그 외 일반식은 shift 부분만 치환 후 eval
-                        def repl(match):
-                            col = match.group(1)
-                            n   = int(match.group(2))
-                            return f"({f'`{col}`' if '.' in col or ' ' in col else col}).shift({n})"
+                if t == "ema":
+                    self.data[k] = ta.ema(self.data["close"], length=int(p.get("length", 20)))
 
-                        tmp = re.sub(r'shift\(\s*([A-Za-z0-9._]+)\s*,\s*(\d+)\s*\)', repl, formula)
-                        self.data[key] = self.data.eval(_safe_eval(tmp), engine="python")
+                elif t in {"bollinger_bands", "bbands", "bb"}:
+                    length = int(p.get("length", 20))
+                    std = float(p.get("stddev", p.get("std", 2)))
+                    self._compute_bbands(length, std, key_prefix=k)
+
+                elif t == "sma":
+                    self.data[k] = ta.sma(self.data["close"], length=int(p.get("length", 20)))
+
                 else:
-                    self.data[key] = self.data.eval(_safe_eval(formula), engine="python")
-
-                print(f"✅ Derived column '{key}' calculated.")
-
+                    logger.warning("Unknown indicator type: %s", t)
             except Exception as e:
-                print(f"⚠️ Failed to compute derived column '{key}': {e}")
+                logger.exception("Failed to compute indicator %s (%s): %s", k, t, e)
 
-    def _compute_indicator_from_spec(self, indicator: Dict[str, Any]):
-        ind_type = (indicator.get("type") or "").lower()
-        params = indicator.get("params", {}) or {}
-        key = indicator.get("key")
+        # 2) 파생 지표
+        for drv in self.strategy.get("derived", []) or []:
+            key = drv.get("key")
+            formula = drv.get("formula")
+            if not key or not formula:
+                continue
+            try:
+                series = self._eval_derived_formula_safe(formula)
+                self.data[key] = series
+                logger.debug("Derived column computed: %s", key)
+            except Exception as e:
+                logger.exception("Failed to compute derived column '%s': %s", key, e)
 
-        if ind_type == "ema":
-            length = int(params.get("length", 20))
-            self.data[key] = ta.ema(self.data["close"], length=length)
+    def _compute_bbands(self, length: int, std: float, key_prefix: Optional[str] = None) -> None:
+        """
+        pandas-ta 버전별 컬럼명이 조금씩 다른 이슈를 보완하여
+        lower/middle/upper를 안정적으로 추출합니다.
+        """
+        bb = ta.bbands(self.data["close"], length=length, std=std)
+        # 버전에 따라 "BBL_", "BBM_", "BBU_" 접두, 혹은 BBL, BBM, BBU 혼재 → 안전 매핑
+        def _first_col(prefix: str) -> Optional[str]:
+            return next((c for c in bb.columns if str(c).startswith(prefix)), None)
 
-        elif ind_type == "sma":
-            length = int(params.get("length", 20))
-            self.data[key] = ta.sma(self.data["close"], length=length)
+        lower_col = _first_col("BBL_") or _first_col("BBL")
+        middle_col = _first_col("BBM_") or _first_col("BBM")
+        upper_col = _first_col("BBU_") or _first_col("BBU")
 
-        elif ind_type in ("bollinger_bands", "bbands", "bb"):
-            length = int(params.get("length", 20))
-            std = float(params.get("stddev", params.get("std", 2)))
-            self._compute_bbands(length, std)
+        if not (lower_col and middle_col and upper_col):
+            raise RuntimeError(f"Unexpected BBANDS columns: {list(bb.columns)}")
 
-        # 필요시 추가 지표 확장 가능
+        def _out_name(suffix: str) -> str:
+            if key_prefix:
+                return f"{key_prefix}.{suffix}"
+            return f"bb.{length}.{suffix}"
 
+        self.data[_out_name("lower")] = bb[lower_col]
+        self.data[_out_name("middle")] = bb[middle_col]
+        self.data[_out_name("upper")] = bb[upper_col]
+
+    # ---------- indicator inference ----------
     def _infer_needed_indicators_from_rules_and_derived(self) -> Set[str]:
-        """rules/derived 안의 토큰에서 ema.N / bb.N.(lower|middle|upper) 요구사항을 추출"""
+        """
+        rules/derived 텍스트에서 'ema.20', 'bb.20.lower' 같은 토큰을 수집합니다.
+        (명시적 indicators에 없더라도 자동 계산하도록)
+        """
         needed: Set[str] = set()
 
-        def scan_text(txt: str):
-            # ema.20, ema.60 같은 토큰
+        def scan_text(txt: str) -> None:
+            # ema.N
             for m in re.finditer(r"\bema\.(\d+)\b", txt, flags=re.IGNORECASE):
                 needed.add(f"ema.{int(m.group(1))}")
-            # bb.20.lower/middle/upper
+            # bb.N.lower | middle | upper
             for m in re.finditer(r"\bbb\.(\d+)\.(lower|middle|upper)\b", txt, flags=re.IGNORECASE):
                 needed.add(f"bb.{int(m.group(1))}.{m.group(2).lower()}")
 
-        # rules 전체 순회
-        def walk(obj: Any):
+        def walk(obj: Any) -> None:
             if isinstance(obj, dict):
                 for k, v in obj.items():
-                    if k in ("lhs", "rhs", "key", "formula"):
-                        if isinstance(v, str):
-                            scan_text(v)
+                    if k in {"lhs", "rhs", "key", "formula"} and isinstance(v, str):
+                        scan_text(v)
                     walk(v)
             elif isinstance(obj, list):
                 for it in obj:
@@ -155,84 +179,82 @@ class BacktestService:
 
         walk(self.strategy.get("rules", {}))
         walk(self.strategy.get("derived", []))
-
         return needed
 
-    def _compute_missing_inferred_indicators(self, needed: Set[str]):
-        # 이미 존재하는 컬럼은 제외
+    def _compute_missing_inferred_indicators(self, needed: Set[str]) -> None:
+        """룰/파생식이 요구하는 지표 중 아직 없는 것만 계산."""
         missing = [tok for tok in needed if tok not in self.data.columns]
         if not missing:
             return
 
-        # 필요한 ema 길이들
-        ema_lengths = sorted({int(m.group(1)) for m in [re.match(r"ema\.(\d+)$", t) for t in missing] if m})
+        # EMA
+        ema_lengths = sorted({int(m.group(1)) for m in filter(None, (re.match(r"ema\.(\d+)$", t) for t in missing))})
         for L in ema_lengths:
             col = f"ema.{L}"
             if col not in self.data.columns:
-                self.data[col] = ta.ema(self.data["close"], length=L)
+                try:
+                    self.data[col] = ta.ema(self.data["close"], length=L)
+                except Exception as e:
+                    logger.exception("Failed to compute inferred EMA(%d): %s", L, e)
 
-        # 필요한 bb 길이들(하나라도 필요하면 세 라인 모두 계산)
-        bb_lengths = sorted({int(m.group(1)) for m in [re.match(r"bb\.(\d+)\.(lower|middle|upper)$", t) for t in missing] if m})
+        # BBANDS (요구되면 lower/middle/upper 전체 산출)
+        bb_lengths = sorted({
+            int(m.group(1))
+            for m in filter(None, (re.match(r"bb\.(\d+)\.(lower|middle|upper)$", t) for t in missing))
+        })
         for L in bb_lengths:
-            # 표준편차는 전략에 명시된 값 우선, 없으면 2
             std = self._find_bb_std_from_strategy_or_default(L)
-            self._compute_bbands(L, std)
+            try:
+                self._compute_bbands(L, std)  # key_prefix 없이 bb.L.suffix 로 생성
+            except Exception as e:
+                logger.exception("Failed to compute inferred BBANDS(%d, std=%s): %s", L, std, e)
 
     def _find_bb_std_from_strategy_or_default(self, length: int) -> float:
-        # indicators에 명시된 stddev를 찾고, 없으면 2.0
         for indicator in (self.strategy.get("indicators") or []):
             t = (indicator.get("type") or "").lower()
-            if t in ("bollinger_bands", "bbands", "bb"):
+            if t in {"bollinger_bands", "bbands", "bb"}:
                 params = indicator.get("params", {}) or {}
                 L = int(params.get("length", -1))
                 if L == length:
                     return float(params.get("stddev", params.get("std", 2)))
         return 2.0
 
-    def _compute_bbands(self, length: int, std: float):
-        bb = ta.bbands(self.data["close"], length=length, std=std)
-        bbl = bb.filter(like="BBL").iloc[:, 0]
-        bbm = bb.filter(like="BBM").iloc[:, 0]
-        bbu = bb.filter(like="BBU").iloc[:, 0]
-        self.data[f"bb.{length}.lower"] = bbl
-        self.data[f"bb.{length}.middle"] = bbm
-        self.data[f"bb.{length}.upper"] = bbu
-
-    # ---------- formula eval ----------
-    def _eval_formula(self, formula: str) -> pd.Series:
+    # ---------- derived formula eval (safe) ----------
+    def _eval_derived_formula_safe(self, formula: str) -> pd.Series:
         """
-        간단한 수식 평가:
-        - shift(col, n) 지원 → self.data['col'].shift(n) 로 치환
-        - self.data의 컬럼 토큰을 self.data['token']으로 치환
+        - shift(col, n) → self.data['col'].shift(n)
+        - 점(.) 포함 컬럼명 안전치환(backtick 사용) 후 DataFrame.eval(engine='python')
+        - raw python eval 지양 (가능한 한 DataFrame.eval 사용)
         """
-        f = str(formula)
+        def _protect_cols(expr: str) -> str:
+            cols = sorted(self.data.columns.tolist(), key=len, reverse=True)
+            out = expr
+            for col in cols:
+                if f"`{col}`" in out:
+                    continue
+                out = re.sub(rf'(?<![`"\w]){re.escape(col)}(?![`"\w])', f"`{col}`", out)
+            return out
 
-        def _shift_repl(m):
+        # shift 치환: shift(foo.bar, 2) → (`foo.bar`).shift(2)
+        def _shift_repl(m: re.Match) -> str:
             col = m.group(1).strip()
             n = int(m.group(2))
-            return f"self.data['{col}'].shift({n})"
+            col_expr = f"`{col}`" if ('.' in col or ' ' in col) else col
+            return f"({col_expr}).shift({n})"
 
-        f = re.sub(r"shift\(\s*([A-Za-z0-9_.]+)\s*,\s*(-?\d+)\s*\)", _shift_repl, f)
-
-        tokens = sorted(set(re.findall(r"[A-Za-z_][A-Za-z0-9_.]*", f)), key=len, reverse=True)
-        exclude = {"shift"}
-        for t in tokens:
-            if t in exclude:
-                continue
-            if t in self.data.columns:
-                f = re.sub(rf"\b{re.escape(t)}\b", f"self.data['{t}']", f)
-
+        replaced = re.sub(r'shift\(\s*([A-Za-z0-9._\s]+)\s*,\s*(-?\d+)\s*\)', _shift_repl, formula)
+        protected = _protect_cols(replaced)
         try:
-            out = eval(f)
-        except Exception:
-            out = pd.Series(np.nan, index=self.data.index)
-        return out
+            return self.data.eval(protected, engine="python")
+        except Exception as e:
+            logger.debug("DataFrame.eval failed for '%s' (%s), falling back to NaN series.", protected, e)
+            return pd.Series(np.nan, index=self.data.index)
 
-    # ---------- conditions ----------
+    # ---------- rule evaluation ----------
     def _evaluate_condition(self, condition: Dict[str, Any], i: int) -> bool:
         ct = (condition.get("type") or "").lower()
 
-        def get_val(token, idx):
+        def get_val(token: Any, idx: int) -> Optional[float]:
             if token is None:
                 return None
             if isinstance(token, (int, float, np.floating)):
@@ -243,50 +265,45 @@ class BacktestService:
                     try:
                         return float(v)
                     except Exception:
-                        return v
+                        return None
                 try:
                     return float(token)
                 except Exception:
                     return None
             return None
 
+        cmp_ops = {
+            "<=": lambda x, y: x <= y,
+            ">=": lambda x, y: x >= y,
+            "<":  lambda x, y: x <  y,
+            ">":  lambda x, y: x >  y,
+            "==": lambda x, y: x == y,
+        }
+
         if ct == "compare":
-            lhs = condition.get("lhs")
-            rhs = condition.get("rhs")
-            value = condition.get("value")
             op = condition.get("op")
-            a = get_val(lhs, i)
-            b = get_val(rhs, i) if rhs is not None else get_val(value, i)
-            if a is None or b is None:
-                return False
-            ops = {"<=": lambda x,y: x <= y, ">=": lambda x,y: x >= y,
-                   "<": lambda x,y: x < y, ">": lambda x,y: x > y, "==": lambda x,y: x == y}
-            return ops.get(op, lambda *_: False)(a, b)
+            a = get_val(condition.get("lhs"), i)
+            b = get_val(condition.get("rhs"), i) if condition.get("rhs") is not None else get_val(condition.get("value"), i)
+            return (a is not None and b is not None and op in cmp_ops and cmp_ops[op](a, b))
 
         if ct == "threshold":
-            lhs = condition.get("lhs")
             op = condition.get("op")
-            value = condition.get("value")
-            a = get_val(lhs, i)
-            b = get_val(value, i)
-            if a is None or b is None:
-                return False
-            ops = {"<=": lambda x,y: x <= y, ">=": lambda x,y: x >= y,
-                   "<": lambda x,y: x < y, ">": lambda x,y: x > y, "==": lambda x,y: x == y}
-            return ops.get(op, lambda *_: False)(a, b)
+            a = get_val(condition.get("lhs"), i)
+            b = get_val(condition.get("value"), i)
+            return (a is not None and b is not None and op in cmp_ops and cmp_ops[op](a, b))
 
         if ct == "crosses_above":
             lhs, rhs = condition.get("lhs"), condition.get("rhs")
             if i == 0 or lhs not in self.data.columns or rhs not in self.data.columns:
                 return False
-            return (self.data[lhs].iloc[i-1] < self.data[rhs].iloc[i-1]) and \
+            return (self.data[lhs].iloc[i - 1] < self.data[rhs].iloc[i - 1]) and \
                    (self.data[lhs].iloc[i] > self.data[rhs].iloc[i])
 
         if ct == "crosses_below":
             lhs, rhs = condition.get("lhs"), condition.get("rhs")
             if i == 0 or lhs not in self.data.columns or rhs not in self.data.columns:
                 return False
-            return (self.data[lhs].iloc[i-1] > self.data[rhs].iloc[i-1]) and \
+            return (self.data[lhs].iloc[i - 1] > self.data[rhs].iloc[i - 1]) and \
                    (self.data[lhs].iloc[i] < self.data[rhs].iloc[i])
 
         if ct == "touched_within":
@@ -298,89 +315,117 @@ class BacktestService:
                     return True
             return False
 
+        logger.debug("Unknown condition type: %s", ct)
         return False
 
     # ---------- backtest core ----------
-    def _execute_trades(self):
+    def _execute_trades(self) -> None:
+        """
+        포지션: -1/0/1 (단순 롱/숏/현금). 수수료, 슬리피지는 미반영(동작 동일 유지).
+        에퀴티 업데이트는 '직전 포지션 * 가격 변화' 누적 방식(기존 로직 유지).
+        """
+        n = len(self.data)
         self.data["signal"] = 0
         self.data["position"] = 0.0
         self.data["equity"] = float(self.initial_balance)
 
-        trades: List[Dict[str, Any]] = []
+        trades: List[Trade] = []
         position: int = 0  # -1/0/1
 
         max_lookback = self._max_lookback_from_available_columns()
         start = max(1, max_lookback)
-        self.data.loc[start-1, "position"] = 0.0
-        self.data.loc[start-1, "equity"] = float(self.initial_balance)
+        self.data.loc[start - 1, "position"] = 0.0
+        self.data.loc[start - 1, "equity"] = float(self.initial_balance)
 
         rules = self.strategy.get("rules", {}) or {}
         buy_rules = (rules.get("buy_condition") or {})
         sell_rules = (rules.get("sell_condition") or {})
 
-        for i in range(start, len(self.data)):
+        for i in range(start, n):
             # 1) Exit
             if position == 1:
                 exits = buy_rules.get("exit", []) or []
                 if any(self._evaluate_condition(cond, i) for cond in exits):
                     position = 0
-                    trades.append({"timestamp": self.data["timestamp"].iloc[i],
-                                   "price": float(self.data["close"].iloc[i]),
-                                   "side": "sell"})
+                    trades.append(Trade(
+                        timestamp=self.data["timestamp"].iloc[i],
+                        price=float(self.data["close"].iloc[i]),
+                        side="sell",
+                    ))
             elif position == -1:
                 exits = sell_rules.get("exit", []) or []
                 if any(self._evaluate_condition(cond, i) for cond in exits):
                     position = 0
-                    trades.append({"timestamp": self.data["timestamp"].iloc[i],
-                                   "price": float(self.data["close"].iloc[i]),
-                                   "side": "buy"})
+                    trades.append(Trade(
+                        timestamp=self.data["timestamp"].iloc[i],
+                        price=float(self.data["close"].iloc[i]),
+                        side="buy",
+                    ))
 
             # 2) Entry
             if position == 0:
                 buy_entries = buy_rules.get("entry", []) or []
                 sell_entries = sell_rules.get("entry", []) or []
+
                 enter_long = bool(buy_entries) and all(self._evaluate_condition(cond, i) for cond in buy_entries)
                 enter_short = bool(sell_entries) and all(self._evaluate_condition(cond, i) for cond in sell_entries)
 
                 if enter_long:
                     position = 1
-                    trades.append({"timestamp": self.data["timestamp"].iloc[i],
-                                   "price": float(self.data["close"].iloc[i]),
-                                   "side": "buy"})
+                    trades.append(Trade(
+                        timestamp=self.data["timestamp"].iloc[i],
+                        price=float(self.data["close"].iloc[i]),
+                        side="buy",
+                    ))
                 elif enter_short:
                     position = -1
-                    trades.append({"timestamp": self.data["timestamp"].iloc[i],
-                                   "price": float(self.data["close"].iloc[i]),
-                                   "side": "sell"})
+                    trades.append(Trade(
+                        timestamp=self.data["timestamp"].iloc[i],
+                        price=float(self.data["close"].iloc[i]),
+                        side="sell",
+                    ))
 
             # 3) 기록 & 에쿼티
             self.data.loc[i, "position"] = float(position)
-            price_change = float(self.data["close"].iloc[i] - self.data["close"].iloc[i-1])
-            prev_equity = float(self.data["equity"].iloc[i-1])
-            prev_pos = float(self.data["position"].iloc[i-1])
+            price_change = float(self.data["close"].iloc[i] - self.data["close"].iloc[i - 1])
+            prev_equity = float(self.data["equity"].iloc[i - 1])
+            prev_pos = float(self.data["position"].iloc[i - 1])
             self.data.loc[i, "equity"] = prev_equity + prev_pos * price_change
 
-        self.results["trades"] = trades
+        # 결과 어댑트(기존 키 유지)
+        self.results["trades"] = [
+            {"timestamp": t.timestamp, "price": t.price, "side": t.side} for t in trades
+        ]
         self.results["equity_curve"] = self.data[["timestamp", "equity"]].to_dict("records")
 
     def _max_lookback_from_available_columns(self) -> int:
-        """ema.N, bb.N.* 가 존재하면 그 최대 N을 룩백으로 사용"""
+        """
+        ema.N, bb.N.* 가 존재하면 그 최대 N을 룩백으로 사용.
+        또한 indicators에 명시된 length도 고려.
+        """
         max_L = 0
         for col in self.data.columns:
             m = re.match(r"(ema|bb)\.(\d+)", col)
             if m:
                 max_L = max(max_L, int(m.group(2)))
-        # 명시된 indicators 기준도 고려
         for ind in (self.strategy.get("indicators") or []):
             L = int((ind.get("params", {}) or {}).get("length", 0))
             max_L = max(max_L, L)
         return max_L
 
     # ---------- metrics ----------
-    def _calculate_metrics(self):
+    def _calculate_metrics(self) -> None:
         eq = self.results.get("equity_curve", [])
-        equity_series = pd.Series([row["equity"] for row in eq],
-                                  index=pd.to_datetime([row["timestamp"] for row in eq]))
+        if not eq:
+            self.results.update({"error": "No equity curve generated"})
+            return
+        equity_series = pd.Series(
+            [row["equity"] for row in eq],
+            index=pd.to_datetime([row["timestamp"] for row in eq]),
+        )
         kpi_service = KpiService(equity_series, self.results.get("trades", []), self.initial_balance)
-        kpis = kpi_service.calculate_kpis()
-        self.results.update(kpis)
+        try:
+            kpis = kpi_service.calculate_kpis()
+            self.results.update(kpis)
+        except Exception as e:
+            logger.exception("KPI calculation failed: %s", e)
