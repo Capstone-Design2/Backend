@@ -190,14 +190,15 @@ class PriceService:
     async def ingest_one_stock_all(
         self,
         db: AsyncSession,
+        kis_code: str,
         years: int,
         months: int,
         period: Period = "D",
     ) -> dict:
         
         try:
-            # 삼성전자 코드
-            ticker_id, code = await self.ticker_client.resolve_one(db, kis_code="005930")
+            # 주식 코드
+            ticker_id, code = await self.ticker_client.resolve_one(db, kis_code=kis_code)
         except (ValueError, LookupError) as e:
             raise HTTPException(status_code=400, detail=str(e))
         
