@@ -73,18 +73,19 @@ async def sync_intraday_today(
 
 @router.post(
     "/one/all",
-    summary="삼성전자 일봉(x년)+분봉(y개월) 데이터 동기화 (KIS)",
+    summary="하나의 주식 일봉(x년)+분봉(y개월) 데이터 동기화 (KIS)",
     description="""
-    삼성전자 일봉(x년)+분봉(y개월) 데이터를 수집하고 price_data 테이블에 upsert합니다.
+    하나의 주식의 일봉(x년)+분봉(y개월) 데이터를 수집하고 price_data 테이블에 upsert합니다.
     """
 )
 async def ingest_one_stock_all(
     db: Annotated[AsyncSession, Depends(get_session)],
     price_svc: Annotated[PriceService, Depends(get_price_service)],
+    kis_code: str = "005930",
     years: int = 3,
     months: int = 1,
 ):
-    return await price_svc.ingest_one_stock_all(db, years=years, months=months)
+    return await price_svc.ingest_one_stock_all(db, kis_code=kis_code, years=years, months=months)
 
 @router.post("/yfinance")
 async def update_price_from_yfinance(
