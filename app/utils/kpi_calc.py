@@ -6,7 +6,7 @@ from typing import Dict, List, Any, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-class KpiService:
+class KpiCalc:
     """
     equity_curve: 시계열 에쿼티(잔고) Series (DatetimeIndex 권장)
     trades: [{"timestamp": ..., "price": ..., "side": "buy"|"sell"}, ...]
