@@ -50,9 +50,10 @@ def rows_from_items(
     rows: List[Dict[str, Any]] = []
     if timeframe == "1D":
         for it in items:
+            ymd = str(it["date"])
             rows.append({
                 "ticker_id": ticker_id,
-                "timestamp": kst_ymd_to_utc_naive(it["date"]),
+                "timestamp": kst_ymd_to_utc_naive(ymd),
                 "timeframe": "1D",
                 "open": it.get("open"),
                 "high": it.get("high"),

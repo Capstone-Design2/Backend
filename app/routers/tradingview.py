@@ -69,6 +69,8 @@ async def tv_history(
     _from: int = Query(..., alias="from"),
     _to: int = Query(..., alias="to"),
     adjusted: bool = Query(False),
+    page_size: Optional[int] = Query(None, ge=1, le=50000),
+    cursor: Optional[int] = Query(None),
 ):
     try:
         svc = TVHistoryService(t_repo, p_repo)
@@ -79,6 +81,8 @@ async def tv_history(
             resolution=resolution,
             adjusted=adjusted,
             db=db,
+            page_size=page_size,
+            cursor_ts=cursor,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
