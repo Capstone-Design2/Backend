@@ -1,4 +1,3 @@
-# app/services/kis_prices.py
 from __future__ import annotations
 
 import asyncio, time, json, random
@@ -10,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 from app.services.kis_auth import (
     get_kis_auth_manager,
-    KIS_API_BASE_URL,   # 예: "https://openapi.koreainvestment.com:9443/uapi/domestic-stock/v1"
+    KIS_API_BASE_URL,
     KIS_APP_KEY,
     KIS_APP_SECRET,
 )
@@ -23,25 +22,6 @@ KIS_MAX_CONCURRENCY = 2            # 동시 요청 제한
 KIS_RETRY_MAX = 4                  # 재시도 횟수
 KIS_BACKOFF_BASE = 0.4             # 지수 백오프 base (초)
 KIS_BACKOFF_JITTER = (0.05, 0.25)  # 지터(랜덤) 범위
-
-# =========================
-# 공통 유틸
-# =========================
-def _extract_time(it: Dict) -> Optional[str]:
-    return (
-        (it.get("stck_cntg_hour") or it.get("stck_trd_tm") or it.get("trd_tm") or it.get("time"))
-        and str(it.get("stck_cntg_hour") or it.get("stck_trd_tm") or it.get("trd_tm") or it.get("time"))
-    )
-
-def _min_hhmmss(items: List[Dict]) -> Optional[str]:
-    times = [t for t in (_extract_time(x) for x in items) if t and len(t) == 6 and t.isdigit()]
-    return min(times) if times else None
-
-def _dec_second(hhmmss: str) -> str:
-    h = int(hhmmss[0:2]); m = int(hhmmss[2:4]); s = int(hhmmss[4:6])
-    total = max(0, h*3600 + m*60 + s - 1)
-    hh = total // 3600; mm = (total % 3600) // 60; ss = total % 60
-    return f"{hh:02d}{mm:02d}{ss:02d}"
 
 # =========================
 # 시각/도메인 유틸
@@ -284,19 +264,19 @@ class KISPrices:
     ) -> List[Dict]:
         """
         주식일별분봉조회(FHKST03010230): date일의 1분봉 전량 수집(30건 페이징)
-        - 중복 제거 및 최종 오름차순 정렬
-        - volume 우선순위: cntg_vol > tvol > (acml_vol 차분)    
+        - 요청일(date)과 KIS 반환일(stck_bsop_date)이 불일치하면 폐기
+        - (date,time) 기준 dedup + 오름차순 정렬
+        - volume 우선순위: cntg_vol > tvol > (acml_vol 차분)
         """
         async def _page(anchor_hms: str) -> List[Dict]:
             params = {
                 "FID_COND_MRKT_DIV_CODE": "J",
-                "FID_INPUT_ISCD": kis_code,        # ex) 005930
-                "FID_INPUT_DATE_1": date,          # ex) 20251020
-                "FID_INPUT_HOUR_1": anchor_hms,    # ex) 153000
+                "FID_INPUT_ISCD": kis_code,
+                "FID_INPUT_DATE_1": date,
+                "FID_INPUT_HOUR_1": anchor_hms,
                 "FID_PW_DATA_INCU_YN": "Y",
-                "FID_FAKE_TICK_INCU_YN": "",       # 공백 필수
+                "FID_FAKE_TICK_INCU_YN": "",
             }
-            
             j = await self._get(
                 TRID_INTRADAY_BY_DATE,
                 "quotations/inquire-time-dailychartprice",
@@ -305,61 +285,64 @@ class KISPrices:
             rows = (j.get("output2") or j.get("output1") or j.get("output") or [])
             return rows if isinstance(rows, list) else []
 
-        # 1) 15:30부터 09:00까지 당기기 (보통 정규장)
+        # 1) 15:30부터 09:00까지 당기기
         all_rows: List[Dict] = []
-        page_limit = 400  # 안전 가드(거의 도달하지 않음)
+        page_limit = 400
         seen_pages = 0
-        
-        # 첫 페이지
-        items = await _page("153000")
 
+        items = await _page("153000")
         while True:
+            if not items:
+                break
             all_rows.extend(items)
 
             # 가장 이른 체결시각
             times = [
-                str(it.get("stck_cntg_hour") or it.get("stck_trd_tm") or it.get("trd_tm") or it.get("time"))
+                str(it.get("stck_cntg_hour") or it.get("stck_trd_tm") or it.get("trd_tm") or it.get("time") or "")
                 for it in items
             ]
-            times = [t for t in times if t and len(t) == 6 and t.isdigit()]
+            times = [t for t in times if len(t) == 6 and t.isdigit()]
             earliest = min(times) if times else None
 
-            # 더 당길 수 없거나 09:00 도달 시 종료
             if not earliest or earliest <= "090000":
                 break
 
-            # 다음 페이지 앵커 = earliest - 1초
+            # 다음 앵커 = earliest - 1초
             h = int(earliest[0:2]); m = int(earliest[2:4]); s = int(earliest[4:6])
             total = max(0, h*3600 + m*60 + s - 1)
             next_anchor = f"{total // 3600:02d}{(total % 3600)//60:02d}{total % 60:02d}"
 
             items = await _page(next_anchor)
-            if not items:
-                break
-
             seen_pages += 1
             if seen_pages >= page_limit:
                 break  # 비정상 루프 방지
 
-        # 2) (date,time) 기준 dedup + 정규화
+        # 2) (date,time) 기준 dedup
         merged: Dict[Tuple[str, str], Dict] = {}
         for it in all_rows:
-            d = str(it.get("stck_bsop_date") or date)
-            t = str(it.get("stck_cntg_hour") or it.get("stck_trd_tm") or it.get("trd_tm") or it.get("time") or "")
-            if not (len(d) == 8 and len(t) == 6 and t.isdigit()):
+            d_field = it.get("stck_bsop_date") or it.get("trd_dd") or it.get("date")
+            t_field = it.get("stck_cntg_hour") or it.get("stck_trd_tm") or it.get("trd_tm") or it.get("time")
+            d = str(d_field) if d_field is not None else ""
+            t = str(t_field) if t_field is not None else ""
+            # **반드시 거래일과 시각이 모두 정상이어야 함**
+            if not (len(d) == 8 and len(t) == 6 and d.isdigit() and t.isdigit()):
                 continue
+            # **요청한 date와 일치하는 거래일만 허용** (휴일/주말 방어)
+            if d != date:
+                continue
+
             merged[(d, t)] = {
                 "date": d, "time": t,
-                "open": it.get("stck_oprc") or it.get("opnprc"),
-                "high": it.get("stck_hgpr") or it.get("hgpr"),
-                "low":  it.get("stck_lwpr") or it.get("lwpr"),
-                "close":it.get("stck_prpr") or it.get("clpr"),
+                "open":  it.get("stck_oprc") or it.get("opnprc"),
+                "high":  it.get("stck_hgpr") or it.get("hgpr"),
+                "low":   it.get("stck_lwpr") or it.get("lwpr"),
+                "close": it.get("stck_prpr") or it.get("clpr"),
                 "cntg_vol": it.get("cntg_vol"),
                 "tvol":     it.get("tvol"),
-                "acml_vol": it.get("acml_vol"),  # 누적
+                "acml_vol": it.get("acml_vol"),
             }
 
-        # 3) 오름차순 정렬 + volume 결정(차분)
+        # 3) 정렬 + volume 계산(차분)
         normalized = sorted(merged.values(), key=lambda x: (x["date"], x["time"]))
 
         out: List[Dict] = []
@@ -378,7 +361,7 @@ class KISPrices:
                     if prev_date != d:
                         prev_acml = None
                     if prev_acml is None:
-                        vol = curr  # 첫 분봉은 누적 자체를 사용(또는 0으로 대체 가능)
+                        vol = curr  # 첫 분봉
                     else:
                         try:
                             vol = str(max(0, int(str(curr)) - int(str(prev_acml))))

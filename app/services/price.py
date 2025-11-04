@@ -17,22 +17,12 @@ from app.services.kis_prices import KISPrices
 from app.utils.timezone import daterange_kst, fmt_ymd, kst_ymd_to_utc_naive, months_ago_kst, today_kst_datetime
 from app.utils.resample import resample_from_1m, rows_from_items
 
-# ---- 타입 별칭 ----
+# 타입 별칭 
 Period = Literal["D", "W", "M", "Y"]
-Unit = int
 TF = Literal["1m", "5m", "15m", "30m", "1h"]
 
-ALLOWED_UNITS: Final[set[int]] = {1, 5, 15, 30, 60}
+# 리샘플 대상 분 단위 목록
 RESAMPLE_MINUTES: Final[List[int]] = [5, 15, 30, 60]
-
-# Unit(int) -> Timeframe 매핑
-TF_FROM_UNIT: Final[Mapping[int, TF]] = {
-    1:  "1m",
-    5:  "5m",
-    15: "15m",
-    30: "30m",
-    60: "1h",
-}
 
 class PriceService:
     def __init__(self):
@@ -56,6 +46,9 @@ class PriceService:
         kis_to_tid = await self.ticker_client.load_kis_to_ticker_id(db)
         if not kis_to_tid:
             return {"synced": 0, "timeframe": "1D", "notes": "no tickers"}
+        
+        # period 검증
+        period = self._ensure_period(period)
 
         try:
             count = await self.ingest_daily_range(
@@ -110,7 +103,7 @@ class PriceService:
 
                 # ② 리샘플 파생 데이터 생성 및 업서트
                 for mins in RESAMPLE_MINUTES:
-                    tf = f"{mins}m" if mins < 60 else "1h"
+                    tf = self._tf_label_from_minutes(mins)
                     derived = resample_from_1m(items_1m, mins)
                     if not derived:
                         continue
@@ -164,7 +157,7 @@ class PriceService:
 
                 # ② 리샘플 파생 데이터 생성 및 업서트
                 for mins in RESAMPLE_MINUTES:
-                    tf = f"{mins}m" if mins < 60 else "1h"
+                    tf = self._tf_label_from_minutes(mins)
                     derived = resample_from_1m(items_1m, mins)
                     if not derived:
                         continue
@@ -213,6 +206,9 @@ class PriceService:
         daily_end = today_kst_datetime()
         daily_start = daily_end - timedelta(days=365 * years)
         
+        # period 검증
+        period = self._ensure_period(period)
+        
         now_end = daily_end
         while now_end >= daily_start:
             now_start = max(daily_start, now_end - timedelta(days=99))
@@ -226,7 +222,7 @@ class PriceService:
                     period=period
                 )
 
-                daily_rows = rows_from_items(ticker_id, daily_items, "1D")
+                daily_rows = rows_from_items(ticker_id, daily_items, self._tf_from_period(period))
                 synced = await self._upsert_rows(db, daily_rows)
                 await db.commit()
 
@@ -251,17 +247,21 @@ class PriceService:
                 ymd = d.strftime("%Y%m%d")
                 items_1m = await kis.get_intraday_by_date(code, date=ymd)
 
+                # 1) 1분봉 저장
                 rows_1m = rows_from_items(ticker_id, items_1m, "1m")
                 s1 = await self._upsert_rows(db, rows_1m)
                 per_tf["1m"] = per_tf.get("1m", 0) + s1
                 total += s1
                 steps.append(f"1m {ymd}: {s1}")
 
-                # 파생 리샘플 TF
+                # 2) 파생 리샘플 TF (5/15/30/60분)
                 if items_1m:
                     for mins in RESAMPLE_MINUTES:
-                        tf = f"{mins}m" if mins < 60 else "1h"
+                        tf = self._tf_label_from_minutes(mins)
                         derived = resample_from_1m(items_1m, mins)
+                        if not derived:
+                            continue 
+
                         rows_tf = rows_from_items(ticker_id, derived, tf)
                         s = await self._upsert_rows(db, rows_tf)
                         per_tf[tf] = per_tf.get(tf, 0) + s
@@ -283,6 +283,17 @@ class PriceService:
             "notes": f"일봉={years}년, 분봉={months}개월(1m 전량 수집 후 리샘플 1/5/15/30/60m)."
         }
         
+    @staticmethod
+    def _tf_from_period(p: Period) -> str:
+        return {"D": "1D", "W": "1W", "M": "1M", "Y": "1Y"}[p]
+    
+    @staticmethod
+    def _tf_label_from_minutes(mins: int) -> str:
+        if mins % 60 == 0:
+            h = mins // 60
+            return f"{h}h"
+        return f"{mins}m"
+            
     async def _upsert_rows(self, db: AsyncSession, rows: Iterable[Dict[str, Any]]) -> int:
         if not rows:
             return 0
@@ -295,12 +306,13 @@ class PriceService:
         return cast(Period, p)
 
     @staticmethod
-    def _to_records_daily(ticker_id: int, items: List[dict]) -> List[dict]:
+    def _to_records_daily(ticker_id: int, items: List[dict], tf: str) -> List[dict]:
         out: List[dict] = []
         for it in items:
-            ts_utc = kst_ymd_to_utc_naive(it["date"])  # YYYYMMDD -> UTC naive
+            ymd = str(it["date"])
+            ts_utc = kst_ymd_to_utc_naive(ymd)
             out.append({
-                "ticker_id": ticker_id, "timestamp": ts_utc, "timeframe": "1D",
+                "ticker_id": ticker_id, "timestamp": ts_utc, "timeframe": tf,
                 "open": it.get("open"), "high": it.get("high"),
                 "low": it.get("low"), "close": it.get("close"),
                 "volume": it.get("volume"), "source": "KIS", "is_adjusted": False,
@@ -347,7 +359,7 @@ class PriceService:
                     fmt_ymd(chunk_end),
                     period=period,
                 )
-                buf.extend(self._to_records_daily(tid, items))
+                buf.extend(self._to_records_daily(tid, items, self._tf_from_period(period)))
 
                 if len(buf) >= batch:
                     total += await self.price_repository.upsert_price_data(db, buf)

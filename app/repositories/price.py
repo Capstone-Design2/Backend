@@ -1,13 +1,18 @@
 from decimal import Decimal
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, Optional, NamedTuple
 
 from fastapi import HTTPException
-from sqlalchemy import func, select, asc
+from sqlalchemy import func, select, asc, and_
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.price_data import PriceData
-from datetime import date, datetime
+from datetime import date, datetime, timezone
+
+class PagedResult(NamedTuple):
+    items: List[PriceData]
+    has_more: bool
+    next_time: Optional[int]
 
 class PriceRepository:
     async def upsert_price_data(self, db: AsyncSession, rows: Iterable[Dict[str, Any]]) -> int:
@@ -80,21 +85,42 @@ class PriceRepository:
         timeframe: str,
         adjusted: bool,
         db: AsyncSession,
-    ) -> List[PriceData]:
+        *,
+        limit: Optional[int] = None,
+        cursor: Optional[datetime] = None,
+    ) -> PagedResult:
+        lower_bound = PriceData.timestamp > cursor if cursor else PriceData.timestamp >= start
+        
         stmt = (
             select(PriceData)
             .where(
-                PriceData.ticker_id == ticker_id,
-                PriceData.timestamp >= start,
-                PriceData.timestamp < end,
-                PriceData.timeframe == timeframe,
-                PriceData.is_adjusted == adjusted,
+                and_(
+                    PriceData.ticker_id == ticker_id,
+                    lower_bound,
+                    PriceData.timestamp < end,
+                    PriceData.timeframe == timeframe,
+                    PriceData.is_adjusted == adjusted,
+                )
             )
             .order_by(asc(PriceData.timestamp))
         )
 
-        result = await db.execute(stmt)
-        return result.scalars().all()
+        real_limit = limit or 10_000
+        stmt = stmt.limit(real_limit + 1)
+
+        res = await db.execute(stmt)
+        rows: List[PriceData] = list(res.scalars().all())
+
+        has_more = False
+        if len(rows) > real_limit:
+            has_more = True
+            rows = rows[:real_limit]
+
+        next_time: Optional[int] = None
+        if has_more and rows:
+            next_time = int(rows[-1].timestamp.replace(tzinfo=timezone.utc).timestamp())
+
+        return PagedResult(items=rows, has_more=has_more, next_time=next_time)
     
     def _to_decimal(self,x) -> Decimal | None:
         if x in (None, ""):
