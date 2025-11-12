@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from pydantic import BaseModel, Field, ConfigDict, model_validator
 from typing import List, Dict, Any, Optional
 from enum import Enum
@@ -91,8 +91,43 @@ class BacktestResultSchema(BaseModel):
     total_return: float = Field(..., description="총 수익률")
     win_rate: float = Field(..., description="승률")
     max_drawdown: float = Field(..., description="최대 낙폭")
+    cagr: float = Field(..., description="연평균 복리 수익률 (CAGR)")
+    sharpe_ratio: float = Field(..., description="샤프 지수")
     total_trades: int = Field(..., description="총 거래 수")
     final_portfolio_value: float = Field(..., description="최종 포트폴리오 가치")
+
+    # ✅ v2 방식: orm_mode 대체
+    model_config = ConfigDict(from_attributes=True)
+
+
+class BacktestResultDetailSchema(BaseModel):
+    """백테스팅 결과 상세 정보 (DB에서 조회)"""
+    result_id: int = Field(..., description="결과 ID")
+    job_id: int = Field(..., description="백테스트 Job ID")
+    user_id: int = Field(..., description="사용자 ID")
+    max_drawdown: Optional[float] = Field(None, description="최대 낙폭")
+    cagr: Optional[float] = Field(None, description="연평균 복리 수익률")
+    sharpe: Optional[float] = Field(None, description="샤프 지수")
+    kpi: Dict[str, Any] = Field(..., description="성과 지표 (JSON)")
+    equity_curve: List[Dict[str, Any]] = Field(..., description="자산 곡선 (JSON)")
+    created_at: datetime = Field(..., description="생성 시각")
+
+    # ✅ v2 방식: orm_mode 대체
+    model_config = ConfigDict(from_attributes=True)
+
+
+class BacktestJobSchema(BaseModel):
+    """백테스트 Job 정보"""
+    job_id: int = Field(..., description="Job ID")
+    user_id: int = Field(..., description="사용자 ID")
+    strategy_id: int = Field(..., description="전략 ID")
+    ticker_id: int = Field(..., description="티커 ID")
+    start_date: date = Field(..., description="시작일")
+    end_date: date = Field(..., description="종료일")
+    timeframe: str = Field(..., description="타임프레임")
+    status: str = Field(..., description="상태 (PENDING/RUNNING/COMPLETED/FAILED)")
+    completed_at: Optional[datetime] = Field(None, description="완료 시각")
+    created_at: datetime = Field(..., description="생성 시각")
 
     # ✅ v2 방식: orm_mode 대체
     model_config = ConfigDict(from_attributes=True)

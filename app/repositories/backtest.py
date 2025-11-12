@@ -121,3 +121,90 @@ class BacktestRepository:
         await db.commit()
         await db.refresh(result)
         return result
+
+    async def get_backtest_result_by_job_id(
+        self,
+        db: AsyncSession,
+        job_id: int
+    ) -> Optional[BacktestResult]:
+        """
+        Job ID로 백테스트 결과를 조회합니다.
+        """
+        from sqlmodel import select
+
+        stmt = select(BacktestResult).where(BacktestResult.job_id == job_id)
+        result = await db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_backtest_result_by_id(
+        self,
+        db: AsyncSession,
+        result_id: int
+    ) -> Optional[BacktestResult]:
+        """
+        Result ID로 백테스트 결과를 조회합니다.
+        """
+        from sqlmodel import select
+
+        stmt = select(BacktestResult).where(BacktestResult.result_id == result_id)
+        result = await db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_user_backtest_results(
+        self,
+        db: AsyncSession,
+        user_id: int,
+        limit: int = 10,
+        offset: int = 0
+    ) -> List[BacktestResult]:
+        """
+        사용자의 백테스트 결과 목록을 조회합니다.
+        """
+        from sqlmodel import select
+
+        stmt = (
+            select(BacktestResult)
+            .where(BacktestResult.user_id == user_id)
+            .order_by(BacktestResult.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        result = await db.execute(stmt)
+        return result.scalars().all()
+
+    async def get_backtest_job_by_id(
+        self,
+        db: AsyncSession,
+        job_id: int
+    ) -> Optional[BacktestJob]:
+        """
+        Job ID로 백테스트 Job을 조회합니다.
+        """
+        from sqlmodel import select
+
+        stmt = select(BacktestJob).where(BacktestJob.job_id == job_id)
+        result = await db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_user_backtest_jobs(
+        self,
+        db: AsyncSession,
+        user_id: int,
+        status: Optional[BacktestStatus] = None,
+        limit: int = 10,
+        offset: int = 0
+    ) -> List[BacktestJob]:
+        """
+        사용자의 백테스트 Job 목록을 조회합니다.
+        """
+        from sqlmodel import select
+
+        stmt = select(BacktestJob).where(BacktestJob.user_id == user_id)
+
+        if status:
+            stmt = stmt.where(BacktestJob.status == status)
+
+        stmt = stmt.order_by(BacktestJob.created_at.desc()).limit(limit).offset(offset)
+
+        result = await db.execute(stmt)
+        return result.scalars().all()

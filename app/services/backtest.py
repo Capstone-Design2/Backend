@@ -184,7 +184,15 @@ class BacktestService:
     def _calculate_performance_metrics(self) -> Dict[str, Any]:
         """시뮬레이션 결과를 바탕으로 최종 성과 지표를 계산합니다."""
         if not self.portfolio_history:
-            return {"total_return": 0, "win_rate": 0, "max_drawdown": 0}
+            return {
+                "total_return": 0,
+                "win_rate": 0,
+                "max_drawdown": 0,
+                "cagr": 0,
+                "sharpe_ratio": 0,
+                "final_portfolio_value": self.initial_cash,
+                "total_trades": 0
+            }
 
         # 1. 총수익률
         final_portfolio_value = self.portfolio_history[-1]['value']
@@ -201,10 +209,48 @@ class BacktestService:
         drawdown = (portfolio_df - peak) / peak
         max_drawdown = drawdown.min() if not drawdown.empty else 0
 
+        # 4. CAGR (Compound Annual Growth Rate)
+        if len(self.portfolio_history) > 1:
+            start_date = self.portfolio_history[0]['date']
+            end_date = self.portfolio_history[-1]['date']
+            days = (end_date - start_date).days
+            years = days / 365.25
+
+            if years > 0:
+                cagr = (final_portfolio_value / self.initial_cash) ** (1 / years) - 1
+            else:
+                cagr = 0
+        else:
+            cagr = 0
+
+        # 5. Sharpe Ratio (일간 수익률 기준)
+        if len(self.portfolio_history) > 1:
+            # 일간 수익률 계산
+            daily_returns = portfolio_df.pct_change().dropna()
+
+            if len(daily_returns) > 0:
+                # 평균 일간 수익률
+                mean_daily_return = daily_returns.mean()
+                # 일간 수익률 표준편차
+                std_daily_return = daily_returns.std()
+
+                if std_daily_return > 0:
+                    # 연율화된 Sharpe Ratio (무위험 수익률 0으로 가정)
+                    # 252 거래일 기준
+                    sharpe_ratio = (mean_daily_return / std_daily_return) * np.sqrt(252)
+                else:
+                    sharpe_ratio = 0
+            else:
+                sharpe_ratio = 0
+        else:
+            sharpe_ratio = 0
+
         return {
             "total_return": total_return,
             "win_rate": win_rate,
             "max_drawdown": max_drawdown,
+            "cagr": cagr,
+            "sharpe_ratio": sharpe_ratio,
             "final_portfolio_value": final_portfolio_value,
             "total_trades": len(sell_trades)
         }
@@ -292,6 +338,8 @@ class BacktestService:
                 "total_trades": performance['total_trades'],
                 "final_portfolio_value": performance['final_portfolio_value'],
                 "initial_cash": self.initial_cash,
+                "cagr": performance['cagr'],
+                "sharpe_ratio": performance['sharpe_ratio'],
                 "trades": [
                     {
                         "type": t['type'],
@@ -312,8 +360,8 @@ class BacktestService:
                 kpi=kpi,
                 equity_curve=equity_curve,
                 max_drawdown=performance['max_drawdown'],
-                cagr=None,  # TODO: CAGR 계산 추가
-                sharpe=None  # TODO: Sharpe ratio 계산 추가
+                cagr=performance['cagr'],
+                sharpe=performance['sharpe_ratio']
             )
             print("Backtest results saved to database.")
 
