@@ -86,11 +86,13 @@ class StrategyDefinitionSchema(BaseModel):
 
 class BacktestResultSchema(BaseModel):
     """백테스팅 실행 결과"""
-    strategy_name: str
-    total_return: float
-    win_rate: float
-    max_drawdown: float
-    # ... 필요 지표 추가
+    job_id: int = Field(..., description="백테스트 Job ID")
+    strategy_name: str = Field(..., description="전략 이름")
+    total_return: float = Field(..., description="총 수익률")
+    win_rate: float = Field(..., description="승률")
+    max_drawdown: float = Field(..., description="최대 낙폭")
+    total_trades: int = Field(..., description="총 거래 수")
+    final_portfolio_value: float = Field(..., description="최종 포트폴리오 가치")
 
     # ✅ v2 방식: orm_mode 대체
     model_config = ConfigDict(from_attributes=True)

@@ -211,42 +211,140 @@ class BacktestService:
 
     async def run(self, ticker: str, start_date: str, end_date: str, user_id: int) -> Dict:
         """백테스팅을 실행하고 결과를 DB에 저장합니다."""
-        await self._load_data(ticker, start_date, end_date)
-        self._calculate_indicators()
+        repo = BacktestRepository()
+        ticker_repo = TickerRepository()
+        job_id = None
 
-        self.cash = self.initial_cash
-        self.position = None
-        self.trades = []
-        self.portfolio_history = []
-
-        print("\nStarting simulation loop...")
-        if self.historical_data is not None:
-            for i in range(len(self.historical_data)):
-                action = self._evaluate_conditions(i)
-                if action == "buy": self._execute_buy(i)
-                elif action == "sell": self._execute_sell(i)
-                self._update_portfolio_value(i)
-        print("Simulation finished.\n")
-        
-        performance = self._calculate_performance_metrics()
-        
-        # 결과를 DB에 저장
         try:
-            repo = BacktestRepository()
+            # 1. Ticker ID 조회
+            ticker_id = await ticker_repo.resolve_symbol_to_id(ticker, self.db)
+
+            # 2. Strategy 생성 (또는 재사용)
+            strategy = await repo.create_or_get_strategy(
+                db=self.db,
+                user_id=user_id,
+                strategy_definition=self.strategy
+            )
+            print(f"Strategy created/retrieved: ID {strategy.strategy_id}")
+
+            # 3. BacktestJob 생성
+            from datetime import datetime
+            start_date_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
+            end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
+
+            job = await repo.create_backtest_job(
+                db=self.db,
+                user_id=user_id,
+                strategy_id=strategy.strategy_id,
+                ticker_id=ticker_id,
+                start_date=start_date_obj,
+                end_date=end_date_obj,
+                timeframe="1D"
+            )
+            job_id = job.job_id
+            print(f"BacktestJob created: ID {job_id}")
+
+            # 4. Job 상태를 RUNNING으로 변경
+            from app.models.backtest import BacktestStatus
+            await repo.update_backtest_job_status(
+                db=self.db,
+                job_id=job_id,
+                status=BacktestStatus.RUNNING
+            )
+
+            # 5. 데이터 로드 및 시뮬레이션 실행
+            await self._load_data(ticker, start_date, end_date)
+            self._calculate_indicators()
+
+            self.cash = self.initial_cash
+            self.position = None
+            self.trades = []
+            self.portfolio_history = []
+
+            print("\nStarting simulation loop...")
+            if self.historical_data is not None:
+                for i in range(len(self.historical_data)):
+                    action = self._evaluate_conditions(i)
+                    if action == "buy":
+                        self._execute_buy(i)
+                    elif action == "sell":
+                        self._execute_sell(i)
+                    self._update_portfolio_value(i)
+            print("Simulation finished.\n")
+
+            # 6. 성과 지표 계산
+            performance = self._calculate_performance_metrics()
+
+            # 7. Equity curve 데이터 준비 (포트폴리오 히스토리를 JSON 형식으로)
+            equity_curve = [
+                {
+                    "timestamp": item['date'].isoformat(),
+                    "value": float(item['value'])
+                }
+                for item in self.portfolio_history
+            ]
+
+            # 8. KPI 데이터 준비 (추가 지표들)
+            kpi = {
+                "strategy_name": self.strategy.strategy_name,
+                "total_return": performance['total_return'],
+                "win_rate": performance['win_rate'],
+                "total_trades": performance['total_trades'],
+                "final_portfolio_value": performance['final_portfolio_value'],
+                "initial_cash": self.initial_cash,
+                "trades": [
+                    {
+                        "type": t['type'],
+                        "date": t['date'].isoformat(),
+                        "price": float(t['price']),
+                        "quantity": float(t['quantity']),
+                        "profit": float(t.get('profit', 0))
+                    }
+                    for t in self.trades
+                ]
+            }
+
+            # 9. 결과 저장
             await repo.create_backtest_result(
                 db=self.db,
                 user_id=user_id,
-                ticker=ticker,
-                start_date=start_date,
-                end_date=end_date,
-                performance_data={**performance, "strategy_name": self.strategy.strategy_name}
+                job_id=job_id,
+                kpi=kpi,
+                equity_curve=equity_curve,
+                max_drawdown=performance['max_drawdown'],
+                cagr=None,  # TODO: CAGR 계산 추가
+                sharpe=None  # TODO: Sharpe ratio 계산 추가
             )
             print("Backtest results saved to database.")
-        except Exception as e:
-            print(f"Error saving backtest results: {e}")
-            # DB 저장 실패가 전체 백테스팅 실패를 의미하지는 않으므로, 에러를 로깅하고 결과는 계속 반환합니다.
 
-        return {"strategy_name": self.strategy.strategy_name, **performance}
+            # 10. Job 상태를 COMPLETED로 변경
+            from datetime import timezone
+            await repo.update_backtest_job_status(
+                db=self.db,
+                job_id=job_id,
+                status=BacktestStatus.COMPLETED,
+                completed_at=datetime.now(timezone.utc).replace(tzinfo=None)
+            )
+
+        except Exception as e:
+            print(f"Error during backtest: {e}")
+            # Job이 생성된 경우 상태를 FAILED로 변경
+            if job_id:
+                try:
+                    await repo.update_backtest_job_status(
+                        db=self.db,
+                        job_id=job_id,
+                        status=BacktestStatus.FAILED
+                    )
+                except Exception as update_error:
+                    print(f"Error updating job status to FAILED: {update_error}")
+            raise  # 원래 에러를 다시 발생시켜 API 레벨에서 처리하도록 함
+
+        return {
+            "job_id": job_id,
+            "strategy_name": self.strategy.strategy_name,
+            **performance
+        }
 
 # Example of how to run the service
 if __name__ == '__main__':
