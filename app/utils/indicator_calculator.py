@@ -42,7 +42,7 @@ def calculate_indicators(
             # 지표 계산 실행
             # 예: data.ta.sma(length=20, append=False)
             result = indicator_func(**indicator_params, append=False)
-            
+
             # 결과가 여러 컬럼(e.g., 볼린저밴드)을 포함하는 DataFrame일 수 있습니다.
             if isinstance(result, pd.DataFrame):
                 # 컬럼 이름이 'BB_UPPER_20_2.0', 'BB_LOWER_20_2.0' 등으로 생성됩니다.
@@ -53,7 +53,7 @@ def calculate_indicators(
                 calculated_indicators[indicator_def.name] = result
 
         except Exception as e:
-            print(f"Error calculating indicator '{indicator_def.name}': {e}")
+            print(f"[ERROR] Failed to calculate indicator '{indicator_def.name}': {e}")
 
     return calculated_indicators
 

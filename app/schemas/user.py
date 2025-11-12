@@ -8,9 +8,9 @@ class UserCreateRequest(BaseModel):
     """
     사용자 생성 요청 스키마
     """
-    name: str = Field(..., min_length=1, max_length=50, description="사용자명")
-    email: EmailStr = Field(..., description="이메일 주소")
-    password: str = Field(..., min_length=8, max_length=100,
+    name: str = Field(min_length=1, max_length=50, description="사용자명")
+    email: EmailStr = Field(description="이메일 주소")
+    password: str = Field(min_length=8, max_length=100,
                           description="비밀번호 (최소 8자)")
 
     class Config:
@@ -46,9 +46,9 @@ class UserResponse(BaseModel):
     """
     사용자 정보 응답 스키마
     """
-    user_id: int = Field(..., description="사용자 ID")
-    name: str = Field(..., description="사용자명")
-    email: str = Field(..., description="이메일 주소")
+    user_id: int = Field(description="사용자 ID")
+    name: str = Field(description="사용자명")
+    email: str = Field(description="이메일 주소")
     created_at: Optional[datetime] = Field(None, description="생성일시")
     updated_at: Optional[datetime] = Field(None, description="수정일시")
 
@@ -69,10 +69,10 @@ class UserListResponse(BaseModel):
     """
     사용자 목록 응답 스키마
     """
-    users: list[UserResponse] = Field(..., description="사용자 목록")
-    total: int = Field(..., description="전체 사용자 수")
-    skip: int = Field(..., description="건너뛴 레코드 수")
-    limit: int = Field(..., description="조회한 레코드 수")
+    users: list[UserResponse] = Field(description="사용자 목록")
+    total: int = Field(description="전체 사용자 수")
+    skip: int = Field(description="건너뛴 레코드 수")
+    limit: int = Field(description="조회한 레코드 수")
 
     class Config:
         json_schema_extra = {
@@ -97,7 +97,7 @@ class ErrorResponse(BaseModel):
     """
     에러 응답 스키마
     """
-    error: str = Field(..., description="에러 메시지")
+    error: str = Field(description="에러 메시지")
     detail: Optional[str] = Field(None, description="상세 에러 정보")
 
     class Config:

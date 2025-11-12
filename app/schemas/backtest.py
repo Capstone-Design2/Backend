@@ -20,9 +20,9 @@ class IndicatorSchema(BaseModel):
     - type: 지표의 종류 (e.g., 'SMA', 'EMA', 'BBANDS')
     - params: 지표 계산에 필요한 파라미터 (e.g., {'period': 20})
     """
-    name: str = Field(..., description="전략 내 지표의 고유 이름")
-    type: str = Field(..., description="지표 종류 (e.g., 'SMA', 'RSI')")
-    params: Dict[str, Any] = Field(..., description="지표 계산 파라미터")
+    name: str = Field(description="전략 내 지표의 고유 이름")
+    type: str = Field(description="지표 종류 (e.g., 'SMA', 'RSI')")
+    params: Dict[str, Any] = Field(description="지표 계산 파라미터")
 
 
 class ConditionSchema(BaseModel):
@@ -32,9 +32,9 @@ class ConditionSchema(BaseModel):
     - operator: 비교 연산자
     - indicator2: 비교할 두 번째 지표 (e.g., 'SMA_long', 'bbands_upper')
     """
-    indicator1: str = Field(..., description="비교할 첫 번째 지표 이름 또는 'price'")
-    operator: OperatorEnum = Field(..., description="비교 연산자")
-    indicator2: str = Field(..., description="비교할 두 번째 지표 이름 또는 상수값")
+    indicator1: str = Field(description="비교할 첫 번째 지표 이름 또는 'price'")
+    operator: OperatorEnum = Field(description="비교 연산자")
+    indicator2: str = Field(description="비교할 두 번째 지표 이름 또는 상수값")
 
 
 class ConditionGroupSchema(BaseModel):
@@ -74,11 +74,11 @@ class StrategyDefinitionSchema(BaseModel):
     사용자 정의 전략의 전체 구조를 정의하는 최상위 스키마
     LLM이 최종적으로 생성해야 할 JSON 포맷입니다.
     """
-    strategy_name: str = Field(..., description="전략의 이름")
-    indicators: List[IndicatorSchema] = Field(..., description="전략에 사용될 지표 목록")
-    buy_conditions: ConditionGroupSchema = Field(..., description="매수 조건 그룹")
-    sell_conditions: ConditionGroupSchema = Field(..., description="매도 조건 그룹")
-    trade_settings: TradeSettingsSchema = Field(..., description="거래 설정")
+    strategy_name: str = Field(description="전략의 이름")
+    indicators: List[IndicatorSchema] = Field(description="전략에 사용될 지표 목록")
+    buy_conditions: ConditionGroupSchema = Field(description="매수 조건 그룹")
+    sell_conditions: ConditionGroupSchema = Field(description="매도 조건 그룹")
+    trade_settings: TradeSettingsSchema = Field(description="거래 설정")
     
     # Pydantic v2 ORM 설정
     model_config = ConfigDict(from_attributes=True)
@@ -86,15 +86,18 @@ class StrategyDefinitionSchema(BaseModel):
 
 class BacktestResultSchema(BaseModel):
     """백테스팅 실행 결과"""
-    job_id: int = Field(..., description="백테스트 Job ID")
-    strategy_name: str = Field(..., description="전략 이름")
-    total_return: float = Field(..., description="총 수익률")
-    win_rate: float = Field(..., description="승률")
-    max_drawdown: float = Field(..., description="최대 낙폭")
-    cagr: float = Field(..., description="연평균 복리 수익률 (CAGR)")
-    sharpe_ratio: float = Field(..., description="샤프 지수")
-    total_trades: int = Field(..., description="총 거래 수")
-    final_portfolio_value: float = Field(..., description="최종 포트폴리오 가치")
+    job_id: int = Field(description="백테스트 Job ID")
+    strategy_name: str = Field(description="전략 이름")
+    total_return: float = Field(description="총 수익률")
+    win_rate: float = Field(description="승률")
+    max_drawdown: float = Field(description="최대 낙폭")
+    cagr: float = Field(description="연평균 복리 수익률 (CAGR)")
+    sharpe_ratio: float = Field(description="샤프 지수")
+    completed_trades: int = Field(description="완료된 거래 수 (라운드 트립)")
+    buy_count: int = Field(description="매수 액션 수")
+    sell_count: int = Field(description="매도 액션 수")
+    total_actions: int = Field(description="총 액션 수 (매수 + 매도)")
+    final_portfolio_value: float = Field(description="최종 포트폴리오 가치")
 
     # ✅ v2 방식: orm_mode 대체
     model_config = ConfigDict(from_attributes=True)
@@ -102,15 +105,15 @@ class BacktestResultSchema(BaseModel):
 
 class BacktestResultDetailSchema(BaseModel):
     """백테스팅 결과 상세 정보 (DB에서 조회)"""
-    result_id: int = Field(..., description="결과 ID")
-    job_id: int = Field(..., description="백테스트 Job ID")
-    user_id: int = Field(..., description="사용자 ID")
+    result_id: int = Field(description="결과 ID")
+    job_id: int = Field(description="백테스트 Job ID")
+    user_id: int = Field(description="사용자 ID")
     max_drawdown: Optional[float] = Field(None, description="최대 낙폭")
     cagr: Optional[float] = Field(None, description="연평균 복리 수익률")
     sharpe: Optional[float] = Field(None, description="샤프 지수")
-    kpi: Dict[str, Any] = Field(..., description="성과 지표 (JSON)")
-    equity_curve: List[Dict[str, Any]] = Field(..., description="자산 곡선 (JSON)")
-    created_at: datetime = Field(..., description="생성 시각")
+    kpi: Dict[str, Any] = Field(description="성과 지표 (JSON)")
+    equity_curve: List[Dict[str, Any]] = Field(description="자산 곡선 (JSON)")
+    created_at: datetime = Field(description="생성 시각")
 
     # ✅ v2 방식: orm_mode 대체
     model_config = ConfigDict(from_attributes=True)
@@ -118,25 +121,25 @@ class BacktestResultDetailSchema(BaseModel):
 
 class BacktestJobSchema(BaseModel):
     """백테스트 Job 정보"""
-    job_id: int = Field(..., description="Job ID")
-    user_id: int = Field(..., description="사용자 ID")
-    strategy_id: int = Field(..., description="전략 ID")
-    ticker_id: int = Field(..., description="티커 ID")
-    start_date: date = Field(..., description="시작일")
-    end_date: date = Field(..., description="종료일")
-    timeframe: str = Field(..., description="타임프레임")
-    status: str = Field(..., description="상태 (PENDING/RUNNING/COMPLETED/FAILED)")
+    job_id: int = Field(description="Job ID")
+    user_id: int = Field(description="사용자 ID")
+    strategy_id: int = Field(description="전략 ID")
+    ticker_id: int = Field(description="티커 ID")
+    start_date: date = Field(description="시작일")
+    end_date: date = Field(description="종료일")
+    timeframe: str = Field(description="타임프레임")
+    status: str = Field(description="상태 (PENDING/RUNNING/COMPLETED/FAILED)")
     completed_at: Optional[datetime] = Field(None, description="완료 시각")
-    created_at: datetime = Field(..., description="생성 시각")
+    created_at: datetime = Field(description="생성 시각")
 
     # ✅ v2 방식: orm_mode 대체
     model_config = ConfigDict(from_attributes=True)
     
 class RunBacktestRequest(BaseModel):
-    ticker: str = Field(..., description="백테스팅을 실행할 티커 (e.g., '005930')")
-    start_date: date = Field(..., description="시작일 (YYYY-MM-DD)")
-    end_date: date = Field(..., description="종료일 (YYYY-MM-DD)")
-    strategy_definition: StrategyDefinitionSchema = Field(..., description="LLM이 생성한 전략 정의 JSON")
+    ticker: str = Field(description="백테스팅을 실행할 티커 (e.g., '005930')")
+    start_date: date = Field(description="시작일 (YYYY-MM-DD)")
+    end_date: date = Field(description="종료일 (YYYY-MM-DD)")
+    strategy_definition: StrategyDefinitionSchema = Field(description="LLM이 생성한 전략 정의 JSON")
 
     # ✅ Pydantic v2 설정 + Swagger 예제 고정(각 그룹은 all/any 중 하나만)
     model_config = ConfigDict(
@@ -149,8 +152,8 @@ class RunBacktestRequest(BaseModel):
                 "strategy_definition": {
                     "strategy_name": "SMA Cross Demo",
                     "indicators": [
-                        {"name": "sma20", "type": "SMA", "params": {"period": 20}},
-                        {"name": "sma60", "type": "SMA", "params": {"period": 60}}
+                        {"name": "sma20", "type": "SMA", "params": {"length": 20}},
+                        {"name": "sma60", "type": "SMA", "params": {"length": 60}}
                     ],
                     "buy_conditions": {
                         "all": [

@@ -31,7 +31,6 @@ class BacktestService:
         """
         주어진 티커와 기간에 대한 과거 가격 데이터를 데이터베이스에서 로드합니다.
         """
-        print(f"Loading data for {ticker} from {start_date} to {end_date}...")
         ticker_repo = TickerRepository()
         price_repo = PriceRepository()
 
@@ -65,23 +64,32 @@ class BacktestService:
             }
             for p in price_data_models
         ]
-        
+
         df = pd.DataFrame(data)
         df = df.set_index("timestamp")
-        
+
         self.historical_data = df
-        print(f"Data loaded. {len(self.historical_data)} rows.")
+        print(f"✓ Loaded {len(self.historical_data)} price records ({start_date} ~ {end_date})")
 
 
     def _calculate_indicators(self):
-        # ... (이전과 동일)
-        print("Calculating indicators...")
         if self.historical_data is None:
             raise ValueError("Historical data is not loaded.")
-        self.indicators_data = calculate_indicators(
-            self.historical_data, self.strategy.indicators
-        )
-        print("Indicators calculated.")
+
+        # Suppress pandas-ta verbose output
+        import sys
+        import io
+        old_stdout = sys.stdout
+        sys.stdout = io.StringIO()  # Redirect stdout to suppress output
+
+        try:
+            self.indicators_data = calculate_indicators(
+                self.historical_data, self.strategy.indicators
+            )
+        finally:
+            sys.stdout = old_stdout  # Restore stdout
+
+        print(f"✓ Indicators calculated: {', '.join(self.indicators_data.keys())}")
 
     def _get_value(self, indicator_name: str, index: int) -> Optional[float]:
         """특정 시점(index)의 지표 값 또는 가격을 가져옵니다."""
@@ -155,10 +163,11 @@ class BacktestService:
         quantity = amount_to_invest // price
         if quantity > 0:
             cost = quantity * price
+            cash_before = self.cash
             self.cash -= cost
             self.position = {'quantity': quantity, 'entry_price': price, 'entry_date': date}
             self.trades.append({'type': 'buy', 'date': date, 'price': price, 'quantity': quantity})
-            print(f"[{date.date()}] BUY:  {quantity} shares at {price:,.0f} KRW")
+            print(f"  [{date.date()}] BUY  {int(quantity):>4} shares @ {price:>8,.0f} KRW | Cash: {cash_before:>12,.0f} → {self.cash:>12,.0f}")
 
     def _execute_sell(self, index: int):
         # ... (이전과 동일)
@@ -167,10 +176,12 @@ class BacktestService:
         date = self.historical_data.index[index]
         quantity = self.position['quantity']
         sale_value = quantity * price
+        cash_before = self.cash
         self.cash += sale_value
         profit = (price - self.position['entry_price']) * quantity
         self.trades.append({'type': 'sell', 'date': date, 'price': price, 'quantity': quantity, 'profit': profit})
-        print(f"[{date.date()}] SELL: {quantity} shares at {price:,.0f} KRW | Profit: {profit:,.0f} KRW")
+        profit_sign = "+" if profit >= 0 else ""
+        print(f"  [{date.date()}] SELL {int(quantity):>4} shares @ {price:>8,.0f} KRW | P&L: {profit_sign}{profit:>10,.0f} | Cash: {cash_before:>12,.0f} → {self.cash:>12,.0f}")
         self.position = None
 
     def _update_portfolio_value(self, index: int):
@@ -191,25 +202,35 @@ class BacktestService:
                 "cagr": 0,
                 "sharpe_ratio": 0,
                 "final_portfolio_value": self.initial_cash,
-                "total_trades": 0
+                "completed_trades": 0,
+                "buy_count": 0,
+                "sell_count": 0,
+                "total_actions": 0
             }
 
         # 1. 총수익률
         final_portfolio_value = self.portfolio_history[-1]['value']
         total_return = (final_portfolio_value - self.initial_cash) / self.initial_cash
 
-        # 2. 승률
+        # 2. 거래 카운트
+        buy_trades = [t for t in self.trades if t['type'] == 'buy']
         sell_trades = [t for t in self.trades if t['type'] == 'sell']
+        buy_count = len(buy_trades)
+        sell_count = len(sell_trades)
+        total_actions = buy_count + sell_count
+        completed_trades = sell_count  # 완료된 라운드 트립
+
+        # 3. 승률
         winning_trades = [t for t in sell_trades if t.get('profit', 0) > 0]
         win_rate = len(winning_trades) / len(sell_trades) if sell_trades else 0
 
-        # 3. 최대 낙폭 (MDD)
+        # 4. 최대 낙폭 (MDD)
         portfolio_df = pd.DataFrame(self.portfolio_history).set_index('date')['value']
         peak = portfolio_df.cummax()
         drawdown = (portfolio_df - peak) / peak
         max_drawdown = drawdown.min() if not drawdown.empty else 0
 
-        # 4. CAGR (Compound Annual Growth Rate)
+        # 5. CAGR (Compound Annual Growth Rate)
         if len(self.portfolio_history) > 1:
             start_date = self.portfolio_history[0]['date']
             end_date = self.portfolio_history[-1]['date']
@@ -223,7 +244,7 @@ class BacktestService:
         else:
             cagr = 0
 
-        # 5. Sharpe Ratio (일간 수익률 기준)
+        # 6. Sharpe Ratio (일간 수익률 기준)
         if len(self.portfolio_history) > 1:
             # 일간 수익률 계산
             daily_returns = portfolio_df.pct_change().dropna()
@@ -252,7 +273,10 @@ class BacktestService:
             "cagr": cagr,
             "sharpe_ratio": sharpe_ratio,
             "final_portfolio_value": final_portfolio_value,
-            "total_trades": len(sell_trades)
+            "completed_trades": completed_trades,
+            "buy_count": buy_count,
+            "sell_count": sell_count,
+            "total_actions": total_actions
         }
 
     async def run(self, ticker: str, start_date: str, end_date: str, user_id: int) -> Dict:
@@ -271,7 +295,6 @@ class BacktestService:
                 user_id=user_id,
                 strategy_definition=self.strategy
             )
-            print(f"Strategy created/retrieved: ID {strategy.strategy_id}")
 
             # 3. BacktestJob 생성
             from datetime import datetime
@@ -288,7 +311,10 @@ class BacktestService:
                 timeframe="1D"
             )
             job_id = job.job_id
-            print(f"BacktestJob created: ID {job_id}")
+            print(f"\n{'='*80}")
+            print(f"BACKTEST JOB #{job_id} | Strategy: {self.strategy.strategy_name}")
+            print(f"Initial Capital: {self.initial_cash:,.0f} KRW")
+            print(f"{'='*80}")
 
             # 4. Job 상태를 RUNNING으로 변경
             from app.models.backtest import BacktestStatus
@@ -307,16 +333,23 @@ class BacktestService:
             self.trades = []
             self.portfolio_history = []
 
-            print("\nStarting simulation loop...")
+            print("✓ Starting simulation...")
+            buy_signal_count = 0
+            sell_signal_count = 0
+
             if self.historical_data is not None:
                 for i in range(len(self.historical_data)):
                     action = self._evaluate_conditions(i)
+
                     if action == "buy":
+                        buy_signal_count += 1
                         self._execute_buy(i)
                     elif action == "sell":
+                        sell_signal_count += 1
                         self._execute_sell(i)
                     self._update_portfolio_value(i)
-            print("Simulation finished.\n")
+
+            print(f"✓ Simulation completed: {buy_signal_count} buys, {sell_signal_count} sells")
 
             # 6. 성과 지표 계산
             performance = self._calculate_performance_metrics()
@@ -335,7 +368,10 @@ class BacktestService:
                 "strategy_name": self.strategy.strategy_name,
                 "total_return": performance['total_return'],
                 "win_rate": performance['win_rate'],
-                "total_trades": performance['total_trades'],
+                "completed_trades": performance['completed_trades'],
+                "buy_count": performance['buy_count'],
+                "sell_count": performance['sell_count'],
+                "total_actions": performance['total_actions'],
                 "final_portfolio_value": performance['final_portfolio_value'],
                 "initial_cash": self.initial_cash,
                 "cagr": performance['cagr'],
@@ -363,7 +399,6 @@ class BacktestService:
                 cagr=performance['cagr'],
                 sharpe=performance['sharpe_ratio']
             )
-            print("Backtest results saved to database.")
 
             # 10. Job 상태를 COMPLETED로 변경
             from datetime import timezone
@@ -374,8 +409,36 @@ class BacktestService:
                 completed_at=datetime.now(timezone.utc).replace(tzinfo=None)
             )
 
+            # 최종 현금 및 포지션 정보
+            final_cash = self.cash
+            final_position_value = 0
+            if self.position and self.historical_data is not None:
+                final_price = self.historical_data['close'].iloc[-1]
+                final_position_value = self.position['quantity'] * final_price
+
+            print(f"\n{'─'*80}")
+            print(f"FINAL SUMMARY")
+            print(f"{'─'*80}")
+            print(f"  Initial Capital    : {self.initial_cash:>15,.0f} KRW")
+            print(f"  Final Cash         : {final_cash:>15,.0f} KRW")
+            if final_position_value > 0:
+                print(f"  Position Value     : {final_position_value:>15,.0f} KRW ({int(self.position['quantity'])} shares)")
+            print(f"  Total Portfolio    : {performance['final_portfolio_value']:>15,.0f} KRW")
+            print(f"  {'─'*78}")
+            print(f"  Total Return       : {performance['total_return']:>14.2%}")
+            print(f"  CAGR               : {performance['cagr']:>14.2%}")
+            print(f"  Sharpe Ratio       : {performance['sharpe_ratio']:>14.2f}")
+            print(f"  Max Drawdown       : {performance['max_drawdown']:>14.2%}")
+            print(f"  Win Rate           : {performance['win_rate']:>14.2%}")
+            print(f"  {'─'*78}")
+            print(f"  Buy Actions        : {performance['buy_count']:>14}")
+            print(f"  Sell Actions       : {performance['sell_count']:>14}")
+            print(f"  Total Actions      : {performance['total_actions']:>14}")
+            print(f"  Completed Trades   : {performance['completed_trades']:>14}")
+            print(f"{'='*80}\n")
+
         except Exception as e:
-            print(f"Error during backtest: {e}")
+            print(f"\n[ERROR] Backtest failed: {e}")
             # Job이 생성된 경우 상태를 FAILED로 변경
             if job_id:
                 try:
