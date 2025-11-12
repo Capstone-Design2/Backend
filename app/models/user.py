@@ -1,8 +1,11 @@
-from typing import Optional
-from sqlmodel import Field
+from typing import Optional, List, TYPE_CHECKING
+from sqlmodel import Field, Relationship
 from app.models.base import BaseModel
+from app.models.backtest import BacktestResult
 from app.utils.security import get_password_hash, verify_password as _verify
 
+if TYPE_CHECKING:
+    from app.models.backtest import BacktestResult
 
 class User(BaseModel, table=True):
     """
@@ -48,6 +51,9 @@ class User(BaseModel, table=True):
         max_length=20,
         description="권한 (USER, ADMIN 등)",
     )
+
+    # Relationships
+    backtest_results: List["BacktestResult"] = Relationship(back_populates="user")
 
     # --------- helpers --------- #
     @classmethod

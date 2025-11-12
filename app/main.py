@@ -18,7 +18,8 @@ from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.database import get_session, init_db
 from app.routers import (price_router, strategy_router, ticker_router,
-                        user_router, auth_router, tradingview_router)
+                        user_router, auth_router, tradingview_router,
+                        backtest as backtest_router)
 from app.utils.dependencies import get_current_user
 from app.utils.logger import sample_logger
 from app.utils.seed_data import init_seed_data
@@ -120,6 +121,7 @@ app.include_router(ticker_router)  # ticker 라우터 등록
 app.include_router(price_router)  # price 라우터 등록
 app.include_router(strategy_router)  # strategy 라우터 등록
 app.include_router(tradingview_router)  # tradingview 라우터 등록
+app.include_router(backtest_router.router) # backtest 라우터 등록
 
 # ----------------------------------------------------------------------
 # 기본 라우트
