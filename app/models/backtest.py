@@ -1,6 +1,6 @@
 from datetime import date, datetime, timezone
 from enum import Enum
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 from decimal import Decimal
 
 from sqlalchemy import Column,CheckConstraint, UniqueConstraint
@@ -10,6 +10,13 @@ from sqlalchemy.types import Numeric
 from sqlmodel import Field
 from app.models.base import BaseModel
 
+from typing import Optional, List
+from sqlmodel import Field, SQLModel, Relationship
+from datetime import date, datetime
+
+if TYPE_CHECKING:
+    # 순환 import 방지용(런타임 import 아님)
+    from app.models.user import User
 
 class BacktestStatus(str, Enum):
     PENDING = "PENDING"
@@ -77,9 +84,8 @@ class BacktestJob(BaseModel, table=True):
 
     completed_at: Optional[datetime] = Field(
         default=None,
-        primary_key=True,
         description="완료 시각(UTC)",
-        sa_column=Column(DateTime(timezone=False)),
+        sa_column=Column(DateTime(timezone=False), nullable=True),
     )
 
 
@@ -93,6 +99,13 @@ class BacktestResult(BaseModel, table=True):
     __table_args__ = (
         UniqueConstraint("job_id", name="uq_btres_job"),
     )
+    
+    user_id: int = Field(
+        foreign_key="users.user_id",
+        nullable=False,
+        description="소유 사용자",
+    )
+    user: "User" = Relationship(back_populates="backtest_results")
 
     result_id: Optional[int] = Field(
         default=None,
@@ -128,13 +141,11 @@ class BacktestResult(BaseModel, table=True):
     kpi: dict = Field(
         default_factory=dict,
         description="기타 성과지표(JSON)",
-        nullable=False,
-        sa_column=Column(JSONB),
+        sa_column=Column(JSONB, nullable=False),
     )
 
     equity_curve: list = Field(
         default_factory=list,
         description="자산 곡선 (list of {ts, equity})",
-        nullable=False,
-        sa_column=Column(JSONB),
+        sa_column=Column(JSONB, nullable=False),
     )
