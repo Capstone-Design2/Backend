@@ -176,14 +176,13 @@ class UserRepository:
         이메일로 사용자 존재 여부를 확인합니다.
         """
         try:
-            # 존재 여부만 확인 -> 가장 가벼운 형태
+            # User 객체를 로드하지 않고 email만 확인
+            from sqlalchemy import func
             result = await db.execute(
-                select(User).where(User.email == email)
+                select(func.count()).select_from(User).where(User.email == email)
             )
-            user = result.scalar_one_or_none()
-
-            logger.info(f"이메일 존재 여부 확인: {email} -> {user}")
-            return user is not None
+            count = result.scalar()
+            return count > 0
 
         except Exception as e:
             await db.rollback()

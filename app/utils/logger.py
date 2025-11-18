@@ -12,6 +12,10 @@ sample_logger = {
             "fmt": '%(levelprefix)s %(asctime)s :: "%(request_line)s" %(status_code)s',
             "use_colors": True,
         },
+        "default": {
+            "fmt": "%(levelname)s:     %(asctime)s - %(name)s - %(message)s",
+            "datefmt": "%Y-%m-%d %H:%M:%S",
+        },
     },
     "handlers": {
         "access": {
@@ -19,8 +23,14 @@ sample_logger = {
             "class": "logging.StreamHandler",
             "stream": "ext://sys.stdout",
         },
+        "default": {
+            "formatter": "default",
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stdout",
+        },
     },
     "loggers": {
         "uvicorn.access": {"handlers": ["access"], "level": "INFO", "propagate": False},
+        "app": {"handlers": ["default"], "level": "INFO", "propagate": False},
     },
 }

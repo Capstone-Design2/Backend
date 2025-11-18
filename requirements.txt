@@ -15,7 +15,7 @@ alembic>=1.14.0
 # 인증 및 보안
 python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.4
-bcrypt>=4.2.0
+bcrypt>=4.0.0,<4.1.0  # passlib 호환을 위해 4.0.x 버전 사용
 python-multipart>=0.0.9
 
 # 개발 도구

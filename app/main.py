@@ -86,12 +86,32 @@ dictConfig(sample_logger)
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    logger.error(
-        f"Invalid request: {request.__dict__} - Errors: {exc.errors()}"
-    )
+    # 사용자 친화적인 에러 메시지 생성
+    errors = exc.errors()
+    error_messages = []
+
+    for error in errors:
+        field = error.get("loc", [])[-1] if error.get("loc") else "unknown"
+        msg = error.get("msg", "")
+
+        # 한글 메시지로 변환
+        if "at least" in msg and "characters" in msg:
+            min_length = error.get("ctx", {}).get("min_length", "")
+            error_messages.append(f"{field}는 최소 {min_length}자 이상으로 설정해주세요.")
+        elif "valid email" in msg.lower():
+            error_messages.append(f"{field}는 유효한 이메일 주소를 입력해주세요.")
+        elif "missing" in msg.lower():
+            error_messages.append(f"{field}는 필수 입력 항목입니다.")
+        else:
+            error_messages.append(f"{field}: {msg}")
+
+    # 로그 출력
+    for message in error_messages:
+        logger.warning(message)
+
     return JSONResponse(
         status_code=422,
-        content={"detail": exc.errors()}
+        content={"detail": errors}
     )
 
 # ----------------------------------------------------------------------

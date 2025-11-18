@@ -9,13 +9,33 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 15
 REFRESH_TOKEN_EXPIRE_DAYS = 7
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_context = CryptContext(
+    schemes=["bcrypt"],
+    deprecated="auto",
+)
 
 def get_password_hash(password: str) -> str:
-    # bcrypt는 72바이트 이상을 지원하지 않으므로 자름
-    if len(password.encode("utf-8")) > 72:
-        password = password.encode("utf-8")[:72].decode("utf-8", errors="ignore")
-    return pwd_context.hash(password)
+    """
+    비밀번호를 bcrypt로 해시화합니다.
+    bcrypt는 72바이트를 초과하는 비밀번호를 지원하지 않으므로,
+    UTF-8 문자 경계를 고려하여 안전하게 자릅니다.
+    """
+    import bcrypt
+
+    password_bytes = password.encode("utf-8")
+
+    # bcrypt는 72바이트까지만 처리하므로, 초과하면 자름
+    if len(password_bytes) > 72:
+        # UTF-8 문자가 중간에 잘리지 않도록 문자 단위로 처리
+        truncated = password[:72]
+        while len(truncated.encode("utf-8")) > 72:
+            truncated = truncated[:-1]
+        password_bytes = truncated.encode("utf-8")
+
+    # bcrypt를 직접 사용하여 해시 생성
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(password_bytes, salt)
+    return hashed.decode("utf-8")
 
 def verify_password(plain: str, hashed: str) -> bool:
     return pwd_context.verify(plain, hashed)
