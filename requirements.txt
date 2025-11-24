@@ -1,6 +1,6 @@
 # requirements.txt
 # FastAPI 및 기본 웹 프레임워크
-fastapi>=0.115.0
+fastapi
 uvicorn[standard]>=0.32.0
 pydantic[email]>=2.10.0
 pydantic-settings>=2.6.0
@@ -38,3 +38,6 @@ numpy>=2.0.0
 yfinance>=0.2.49
 pandas-ta>=0.4.71b0
 matplotlib>=3.9.0
+
+# LLM
+google-genai

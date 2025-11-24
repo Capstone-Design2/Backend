@@ -1,5 +1,5 @@
 # app/schemas/strategy.py
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -22,3 +22,7 @@ class StrategyResponse(BaseModel):
     strategy_name: str = Field(description="전략 이름")
     description: str = Field(description="전략 설명")
     rules: Dict[str, Any] = Field(description="전략 룰 JSON")
+
+
+class StrategyChatRequest(BaseModel):
+    content: str = Field(description="메시지")

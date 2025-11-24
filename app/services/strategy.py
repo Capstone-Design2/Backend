@@ -2,12 +2,14 @@
 import logging
 from typing import List, Optional, Tuple
 
+from app.repositories.strategy import StrategyRepository
+from app.schemas.strategy import (StrategyChatRequest, StrategyRequest,
+                                  StrategyResponse, StrategyUpdateRequest)
+from app.schemas.user import UserResponse
+from app.utils.llm_client import (GeminiClient, test_response_schema,
+                                  test_system_prompt)
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.repositories.strategy import StrategyRepository
-from app.schemas.strategy import (StrategyRequest, StrategyResponse, StrategyUpdateRequest)
-from app.schemas.user import UserResponse
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +124,18 @@ class StrategyService:
                     status_code=status.HTTP_400_BAD_REQUEST, detail="데이터베이스에서 전략을 삭제하지 못했습니다.")
 
             return None
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+    async def strategy_chat(self, request: StrategyChatRequest):
+        try:
+            response = await GeminiClient.generate_structured_content(
+                system_prompt=test_system_prompt,
+                response_schema=test_response_schema,
+                contents=[request.content],
+            )
+            return response.parsed
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
