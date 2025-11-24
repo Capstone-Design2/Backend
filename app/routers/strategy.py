@@ -78,7 +78,7 @@ async def delete_strategy(
     return {"message": "전략 삭제 성공"}
 
 
-@router.post("/strategy_chat")
+@router.post("/chat")
 async def strategy_chat(request: StrategyChatRequest,
                         service: Annotated[StrategyService, Depends(get_strategy_service)]):
     return await service.strategy_chat(request)
