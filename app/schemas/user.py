@@ -1,7 +1,7 @@
 # schemas/user.py
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 class UserCreateRequest(BaseModel):
@@ -12,6 +12,14 @@ class UserCreateRequest(BaseModel):
     email: EmailStr = Field(description="이메일 주소")
     password: str = Field(min_length=8, max_length=100,
                           description="비밀번호 (최소 8자)")
+
+    @field_validator('password')
+    @classmethod
+    def validate_password_bytes(cls, v: str) -> str:
+        """bcrypt는 72바이트까지만 지원하므로 사전 검증"""
+        if len(v.encode('utf-8')) > 72:
+            raise ValueError('비밀번호는 UTF-8 인코딩 시 72바이트를 초과할 수 없습니다.')
+        return v
 
     class Config:
         json_schema_extra = {
@@ -32,6 +40,14 @@ class UserUpdateRequest(BaseModel):
     email: Optional[EmailStr] = Field(None, description="이메일 주소")
     password: Optional[str] = Field(
         None, min_length=8, max_length=100, description="새 비밀번호")
+
+    @field_validator('password')
+    @classmethod
+    def validate_password_bytes(cls, v: Optional[str]) -> Optional[str]:
+        """bcrypt는 72바이트까지만 지원하므로 사전 검증"""
+        if v is not None and len(v.encode('utf-8')) > 72:
+            raise ValueError('비밀번호는 UTF-8 인코딩 시 72바이트를 초과할 수 없습니다.')
+        return v
 
     class Config:
         json_schema_extra = {
