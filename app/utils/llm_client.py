@@ -9,8 +9,7 @@ from google.genai.types import (GenerateContentConfig, GoogleSearch,
 class GeminiClient:
     """Gemini API 클라이언트 클래스"""
 
-    _api_key = os.getenv(
-        "GOOGLE_API_KEY", "AIzaSyBhYU0D1rrywjnxPRk2NxQO43j3IJ233b8")
+    _api_key = os.getenv("GOOGLE_API_KEY")
 
     _model_id = "gemini-2.5-flash"
 
