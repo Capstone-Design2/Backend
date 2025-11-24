@@ -1,15 +1,15 @@
 # app/routers/strategy.py
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.database import get_session
-from app.schemas.strategy import StrategyRequest, StrategyUpdateRequest
+from app.schemas.strategy import (StrategyChatRequest, StrategyRequest,
+                                  StrategyUpdateRequest)
 from app.schemas.user import UserResponse
 from app.services.strategy import StrategyService
 from app.utils.dependencies import get_current_user, get_strategy_service
 from app.utils.router import get_router
+from fastapi import Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = get_router("strategy")
 
@@ -76,3 +76,9 @@ async def delete_strategy(
 ):
     await service.delete_strategy(strategy_id, db)
     return {"message": "전략 삭제 성공"}
+
+
+@router.post("/strategy_chat")
+async def strategy_chat(request: StrategyChatRequest,
+                        service: Annotated[StrategyService, Depends(get_strategy_service)]):
+    return await service.strategy_chat(request)
