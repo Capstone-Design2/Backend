@@ -6,10 +6,15 @@ from app.repositories.strategy import StrategyRepository
 from app.schemas.strategy import (StrategyChatRequest, StrategyRequest,
                                   StrategyResponse, StrategyUpdateRequest)
 from app.schemas.user import UserResponse
-from app.utils.llm_client import (GeminiClient, test_response_schema,
-                                  test_system_prompt)
-from fastapi import HTTPException, status
+from app.utils.llm_client import GeminiClient
+from fastapi import HTTPException, status,Depends
 from sqlalchemy.ext.asyncio import AsyncSession
+
+
+from app.schemas.strategy import StrategyConditionState, StrategyChatRequest
+from app.repositories.strategy import StrategyStateRepository
+from app.repositories.strategy import get_strategy_state_repo
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -19,8 +24,9 @@ class StrategyService:
     전략 관련 비즈니스 로직을 담당하는 Service 클래스
     """
 
-    def __init__(self):
+    def __init__(self, state_repo: StrategyStateRepository):
         self.strategy_repo = StrategyRepository()
+        self.state_repo = state_repo
 
     async def create_strategy(
         self, strategy_data: StrategyRequest, db: AsyncSession, user_id: Optional[int] = 1
@@ -127,15 +133,41 @@ class StrategyService:
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
-
+    
     async def strategy_chat(self, request: StrategyChatRequest):
+        session_id = request.session_id or str(uuid.uuid4())
+
+        # 세션 상태 불러오기
+        state = self.state_repo.get(session_id)
+        if state is None:
+            state = StrategyConditionState()
+            self.state_repo.save(session_id, state)
+
         try:
-            response = await GeminiClient.generate_structured_content(
-                system_prompt=test_system_prompt,
-                response_schema=test_response_schema,
-                contents=[request.content],
+            parsed = await GeminiClient.generate_strategy_chat(
+                content=request.content,
+                session_state=state.model_dump(),
             )
-            return response.parsed
         except Exception as e:
+            logger.error(f"Gemini 전략 채팅 중 오류 발생: {e}", exc_info=True)
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"LLM 호출 중 오류가 발생했습니다: {e}",
+            )
+
+        # 상태 갱신
+        new_state = StrategyConditionState(**parsed["conditions"])
+        self.state_repo.save(session_id, new_state)
+
+        status_value = parsed.get("status", "chat")
+        if isinstance(status_value, list) and len(status_value) > 0:
+            status_value = status_value[0]
+
+        return {
+            "session_id": session_id,
+            "status": status_value,
+            "reply": parsed["reply"],
+            "conditions": new_state.model_dump(),
+            "strategy": parsed.get("strategy"),
+        }
+

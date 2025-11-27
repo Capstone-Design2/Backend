@@ -7,6 +7,10 @@ from sqlalchemy.future import select
 
 from app.models.strategy import Strategy
 
+from abc import ABC, abstractmethod
+from typing import Optional
+from app.schemas.strategy import StrategyConditionState
+
 logger = logging.getLogger(__name__)
 
 
@@ -102,3 +106,31 @@ class StrategyRepository:
         except Exception as e:
             await db.rollback()
             raise Exception(f"Error deleting strategy {strategy_id}: {e}")
+    
+
+# 대화 상태 저장소 (state)
+class StrategyStateRepository(ABC):
+    @abstractmethod
+    def get(self, session_id: str) -> Optional[StrategyConditionState]:
+        pass
+
+    @abstractmethod
+    def save(self, session_id: str, state: StrategyConditionState):
+        pass
+
+# In-memory 저장소 (전역 싱글톤)
+class StrategyStateMemoryRepository(StrategyStateRepository):
+    def __init__(self):
+        self._states: Dict[str, StrategyConditionState] = {}
+
+    def get(self, session_id: str) -> Optional[StrategyConditionState]:
+        return self._states.get(session_id)
+
+    def save(self, session_id: str, state: StrategyConditionState):
+        self._states[session_id] = state
+
+
+# 전역 인스턴스 (싱글톤)
+_strategy_state_repo_singleton = StrategyStateMemoryRepository()
+def get_strategy_state_repo() -> StrategyStateRepository:
+    return _strategy_state_repo_singleton
