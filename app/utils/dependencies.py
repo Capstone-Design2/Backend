@@ -13,6 +13,10 @@ from app.services.ticker import TickerService
 from app.services.user import UserService
 from app.utils.security import decode_token
 
+from app.repositories.strategy import StrategyStateRepository, get_strategy_state_repo
+from app.repositories.strategy import StrategyStateMemoryRepository
+
+
 # Swagger에서 Authorize → 토큰만 입력해도 Bearer 자동으로 붙음
 auth_scheme = HTTPBearer()
 
@@ -71,9 +75,13 @@ async def get_ticker_service(
     return TickerService(auth_manager=auth_manager)
 
 
-async def get_strategy_service() -> StrategyService:
-    return StrategyService()
+def get_strategy_service(
+    state_repo: StrategyStateRepository = Depends(get_strategy_state_repo),
+):
+    return StrategyService(state_repo=state_repo)
 
 
 async def get_price_service() -> PriceService:
     return PriceService()
+
+

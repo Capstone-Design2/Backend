@@ -26,3 +26,13 @@ class StrategyResponse(BaseModel):
 
 class StrategyChatRequest(BaseModel):
     content: str = Field(description="메시지")
+    session_id: Optional[str] = Field(default=None, description="세션 ID") #서버가 누구인지 알기 위한 id
+
+
+# 전략 상태 모델
+class StrategyConditionState(BaseModel):
+    indicators: bool = False
+    buy_entry: bool = False
+    buy_exit: bool = False
+    sell_entry: bool = False
+    sell_exit: bool = False
