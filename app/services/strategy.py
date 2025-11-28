@@ -137,12 +137,10 @@ class StrategyService:
     async def strategy_chat(self, request: StrategyChatRequest):
         session_id = request.session_id or str(uuid.uuid4())
 
-        # 세션 상태 불러오기
+        # 세션 상태 가져오기
         state = self.state_repo.get(session_id)
-        if state is None:
-            state = StrategyConditionState()
-            self.state_repo.save(session_id, state)
 
+        # LLM 호출
         try:
             parsed = await GeminiClient.generate_strategy_chat(
                 content=request.content,
@@ -155,13 +153,12 @@ class StrategyService:
                 detail=f"LLM 호출 중 오류가 발생했습니다: {e}",
             )
 
-        # 상태 갱신
+        # LLM 응답 기반으로 새로운 상태 구성
         new_state = StrategyConditionState(**parsed["conditions"])
-        self.state_repo.save(session_id, new_state)
 
+        # 저장
+        self.state_repo.save(session_id, new_state)
         status_value = parsed.get("status", "chat")
-        if isinstance(status_value, list) and len(status_value) > 0:
-            status_value = status_value[0]
 
         return {
             "session_id": session_id,
@@ -170,4 +167,3 @@ class StrategyService:
             "conditions": new_state.model_dump(),
             "strategy": parsed.get("strategy"),
         }
-
