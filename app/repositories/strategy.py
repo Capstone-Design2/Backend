@@ -1,6 +1,8 @@
 # app/repositories/strategy.py
 import logging
 from typing import Any, Dict, List, Optional
+from threading import Lock
+import copy
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -111,26 +113,43 @@ class StrategyRepository:
 # 대화 상태 저장소 (state)
 class StrategyStateRepository(ABC):
     @abstractmethod
-    def get(self, session_id: str) -> Optional[StrategyConditionState]:
+    def get(self, session_id: str) -> StrategyConditionState:
+        """세션상태 가져오기, 없으면 초기상태를 생성"""
         pass
 
     @abstractmethod
     def save(self, session_id: str, state: StrategyConditionState):
+        """세션상태 저장"""
         pass
 
 # In-memory 저장소 (전역 싱글톤)
 class StrategyStateMemoryRepository(StrategyStateRepository):
     def __init__(self):
         self._states: Dict[str, StrategyConditionState] = {}
+        self._lock = Lock()
 
-    def get(self, session_id: str) -> Optional[StrategyConditionState]:
-        return self._states.get(session_id)
+    def get(self, session_id: str) -> StrategyConditionState:
+        """
+        세션 상태를 가져오기,
+        없으면 새 StrategyConditionState를 생성하여 저장 후 반환
+        """
+        with self._lock:
+            if session_id not in self._states:
+                # 초기 상태 자동 생성
+                self._states[session_id] = StrategyConditionState()
+
+            # 방어적 복사로 반환 (외부에서 값 변경 영향 방지)
+            return copy.deepcopy(self._states[session_id])
 
     def save(self, session_id: str, state: StrategyConditionState):
-        self._states[session_id] = state
-
+        """
+        세션상태 저장
+        """
+        with self._lock:
+            self._states[session_id] = copy.deepcopy(state)
 
 # 전역 인스턴스 (싱글톤)
 _strategy_state_repo_singleton = StrategyStateMemoryRepository()
+
 def get_strategy_state_repo() -> StrategyStateRepository:
     return _strategy_state_repo_singleton
