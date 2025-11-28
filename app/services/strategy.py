@@ -135,7 +135,7 @@ class StrategyService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
     
     async def strategy_chat(self, request: StrategyChatRequest):
-        session_id = request.session_id
+        session_id = request.session_id or str(uuid.uuid4())
 
         # 세션 상태 가져오기
         state = self.state_repo.get(session_id)

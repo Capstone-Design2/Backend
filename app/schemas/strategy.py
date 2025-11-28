@@ -25,7 +25,7 @@ class StrategyResponse(BaseModel):
 
 
 class StrategyChatRequest(BaseModel):
-    session_id: str = Field(description="세션 ID") #서버가 누구인지 알기 위한 id
+    session_id: Optional[str] = Field(default=None) #서버가 누구인지 알기 위한 id
     content: str = Field(description="메시지")
 
 # 전략 상태 모델 (조건 충족 여부 + 상세 내용)
