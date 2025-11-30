@@ -74,8 +74,7 @@ class Order(BaseModel, table=True):
     )
 
     quantity: Decimal = Field(
-        sa_column=Column(Numeric(20, 8, asdecimal=True)),
-        nullable=False,
+        sa_column=Column(Numeric(20, 8, asdecimal=True), nullable=False),
         description="주문 수량",
     )
 
@@ -92,8 +91,7 @@ class Order(BaseModel, table=True):
 
     submitted_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None),
-        nullable=False,
-        sa_column=Column(DateTime(timezone=False)),
+        sa_column=Column(DateTime(timezone=False), nullable=False),
         description="주문 접수 시각(UTC)",
     )
 

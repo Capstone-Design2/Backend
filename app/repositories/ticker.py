@@ -29,6 +29,12 @@ class TickerRepository:
         stmt = select(Ticker).where(Ticker.company_name == name)
         result = await db.execute(stmt)
         return result.scalars().first()
+
+    async def get_ticker_by_kis_code(self, db: AsyncSession, kis_code: str) -> Optional[Ticker]:
+        """KIS 종목 코드로 티커를 조회합니다."""
+        stmt = select(Ticker).where(Ticker.kis_code == kis_code)
+        result = await db.execute(stmt)
+        return result.scalars().first()
     
     async def resolve_symbol_to_id(self, symbol: str, db: AsyncSession) -> int:
         s = symbol.strip()

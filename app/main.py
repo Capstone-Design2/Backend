@@ -8,6 +8,7 @@ from logging import getLogger
 from logging.config import dictConfig
 from os import environ
 from types import SimpleNamespace
+import asyncio
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
@@ -19,17 +20,22 @@ from app.core.config import settings
 from app.database import get_session, init_db
 from app.routers import (price_router, strategy_router, ticker_router,
                         user_router, auth_router, tradingview_router,
-                        backtest as backtest_router)
+                        paper_trading_router,
+                        backtest as backtest_router, websocket as websocket_router)
 from app.utils.dependencies import get_current_user
 from app.utils.logger import sample_logger
 from app.utils.seed_data import init_seed_data
+from app.services.kis_websocket import get_kis_ws_client
+from app.routers.websocket import broadcast_worker
+from app.services.order_executor import get_order_executor
 
 
 # ----------------------------------------------------------------------
-# Lifespan: 앱 시작 시 DB 초기화
+# Lifespan: 앱 시작 시 DB 초기화 및 백그라운드 태스크 관리
 # ----------------------------------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # DB 초기화
     await init_db()
 
     # 초기 데이터 시딩 (기본 전략 등)
@@ -40,7 +46,56 @@ async def lifespan(app: FastAPI):
             logger.error(f"데이터 시딩 중 오류 발생: {e}")
         break  # 첫 번째 세션만 사용 (get_session()이 자동으로 close 처리)
 
+    # 백그라운드 태스크 시작
+    tasks = []
+
+    # WebSocket 브로드캐스트 워커
+    broadcast_task = asyncio.create_task(broadcast_worker())
+    tasks.append(broadcast_task)
+    logger.info("WebSocket 브로드캐스트 워커 시작됨")
+
+    # Order Execution Engine
+    order_executor = get_order_executor()
+    executor_task = asyncio.create_task(order_executor.run())
+    tasks.append(executor_task)
+    logger.info("Order Executor 시작됨")
+
+    # KIS WebSocket Client (선택적 - 환경 변수로 제어 가능)
+    if environ.get("ENABLE_KIS_WEBSOCKET", "false").lower() == "true":
+        kis_ws_client = get_kis_ws_client()
+
+        async def kis_ws_task():
+            try:
+                await kis_ws_client.connect()
+                # 기본 구독 종목 (환경 변수에서 읽기)
+                default_tickers = environ.get("KIS_WS_DEFAULT_TICKERS", "005930,000660").split(",")
+                await kis_ws_client.subscribe(default_tickers)
+                await kis_ws_client.listen()
+            except Exception as e:
+                logger.error(f"KIS WebSocket 태스크 오류: {e}")
+
+        kis_task = asyncio.create_task(kis_ws_task())
+        tasks.append(kis_task)
+        logger.info("KIS WebSocket 클라이언트 시작됨")
+
     yield
+
+    # 앱 종료 시 백그라운드 태스크 정리
+    logger.info("백그라운드 태스크 종료 중...")
+    for task in tasks:
+        task.cancel()
+
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+    # KIS WebSocket 연결 종료
+    if environ.get("ENABLE_KIS_WEBSOCKET", "false").lower() == "true":
+        try:
+            kis_ws_client = get_kis_ws_client()
+            await kis_ws_client.disconnect()
+        except Exception as e:
+            logger.error(f"KIS WebSocket 종료 오류: {e}")
+
+    logger.info("백그라운드 태스크 정리 완료")
 
 
 logger = getLogger(__name__)
@@ -141,7 +196,9 @@ app.include_router(ticker_router)  # ticker 라우터 등록
 app.include_router(price_router)  # price 라우터 등록
 app.include_router(strategy_router)  # strategy 라우터 등록
 app.include_router(tradingview_router)  # tradingview 라우터 등록
+app.include_router(paper_trading_router)  # paper trading 라우터 등록
 app.include_router(backtest_router.router) # backtest 라우터 등록
+app.include_router(websocket_router.router)  # WebSocket 라우터 등록
 
 # ----------------------------------------------------------------------
 # 기본 라우트

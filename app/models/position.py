@@ -38,13 +38,11 @@ class Position(BaseModel, table=True):
     )
 
     quantity: Decimal = Field(
-        sa_column=Column(Numeric(20, 8, asdecimal=True)),
-        nullable=False,
+        sa_column=Column(Numeric(20, 8, asdecimal=True), nullable=False),
         description="현재 수량",
     )
 
     average_buy_price: Decimal = Field(
-        sa_column=Column(Numeric(20, 8, asdecimal=True)),
-        nullable=False,
+        sa_column=Column(Numeric(20, 8, asdecimal=True), nullable=False),
         description="평균 매입 단가",
     )
