@@ -11,7 +11,7 @@ Backend/
 │   │   └── run_experiment.py           # 실험/백테스트 실행 CLI 스크립트
 │   ├── core/
 │   │   ├── config.py                   # 설정(환경 변수 로딩, Settings 클래스 등)
-│   │   ├── events.py                   # FastAPI lifecycle 이벤트 (startup/shutdown)
+│   │   ├── events.py                   # asyncio 기반 실시간 시세 Pub/Sub 이벤트 버스 (KIS WebSocket → 다중 컨슈머 전달)
 │   │   └── tradingview.py              # TradingView 연동 설정 및 유틸
 │   ├── models/                         # 데이터베이스 모델 (SQLAlchemy)
 │   │   ├── backtest.py                 # 백테스트 모델
