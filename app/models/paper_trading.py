@@ -35,27 +35,24 @@ class PaperTradingAccount(BaseModel, table=True):
 
     initial_balance: Decimal = Field(
         default = Decimal("0"),
-        sa_column=Column(Numeric(20, 8, asdecimal=True),server_default=text("0")),
-        nullable=False,
+        sa_column=Column(Numeric(20, 8, asdecimal=True), server_default=text("0"), nullable=False),
         description="초기 예수금",
     )
 
     current_balance: Decimal = Field(
         default = Decimal("0"),
-        sa_column=Column(Numeric(20, 8, asdecimal=True),server_default=text("0")),
-        nullable=False,
+        sa_column=Column(Numeric(20, 8, asdecimal=True), server_default=text("0"), nullable=False),
         description="현재 현금 잔액",
     )
 
     total_asset_value: Decimal = Field(
         default = Decimal("0"),
-        sa_column=Column(Numeric(20, 8, asdecimal=True),server_default=text("0")),
-        nullable=False,
+        sa_column=Column(Numeric(20, 8, asdecimal=True), server_default=text("0"), nullable=False),
         description="총 자산 평가액",
     )
 
     is_active: bool = Field(
         default=False,
         description="활성화 여부(Kill Switch)",
-        sa_column_kwargs={"server_default": text("0")}
+        sa_column_kwargs={"server_default": text("false")}
     )

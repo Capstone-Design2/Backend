@@ -34,20 +34,17 @@ class Execution(BaseModel, table=True):
     )
 
     quantity: Decimal = Field(
-        sa_column=Column(Numeric(20, 8,asdecimal=True)),
-        nullable=False,
+        sa_column=Column(Numeric(20, 8, asdecimal=True), nullable=False),
         description="체결 수량",
     )
 
     price: Decimal = Field(
-        sa_column=Column(Numeric(20, 8,asdecimal=True)),
-        nullable=False,
+        sa_column=Column(Numeric(20, 8, asdecimal=True), nullable=False),
         description="체결 단가",
     )
 
     exec_time: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None),
-        nullable=False,
-        sa_column=Column(DateTime(timezone=False)),
+        sa_column=Column(DateTime(timezone=False), nullable=False),
         description="체결 시각(UTC)",
     )
