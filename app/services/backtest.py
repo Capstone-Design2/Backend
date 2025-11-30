@@ -125,19 +125,106 @@ class BacktestService:
             return None
 
     def _check_single_condition(self, condition: ConditionSchema, index: int) -> bool:
-        # ... (이전과 동일)
-        if index == 0: return False
+        """단일 조건을 평가합니다."""
+        # 기본 값 조회
         val1_curr = self._get_value(condition.indicator1, index)
         val2_curr = self._get_value(condition.indicator2, index)
-        if val1_curr is None or val2_curr is None: return False
-        if condition.operator in [OperatorEnum.CROSSES_ABOVE, OperatorEnum.CROSSES_BELOW]:
+
+        if val1_curr is None or val2_curr is None:
+            return False
+
+        # 기본 비교 연산자
+        if condition.operator == OperatorEnum.IS_ABOVE:
+            return val1_curr > val2_curr
+        elif condition.operator == OperatorEnum.IS_BELOW:
+            return val1_curr < val2_curr
+        elif condition.operator == OperatorEnum.IS_ABOVE_OR_EQUAL:
+            return val1_curr >= val2_curr
+        elif condition.operator == OperatorEnum.IS_BELOW_OR_EQUAL:
+            return val1_curr <= val2_curr
+        elif condition.operator == OperatorEnum.EQUALS:
+            return abs(val1_curr - val2_curr) < 1e-9  # Float 비교
+        elif condition.operator == OperatorEnum.NOT_EQUALS:
+            return abs(val1_curr - val2_curr) >= 1e-9
+
+        # 크로스 연산자 (이전 값 필요)
+        elif condition.operator in [OperatorEnum.CROSSES_ABOVE, OperatorEnum.CROSSES_BELOW]:
+            if index == 0:
+                return False
             val1_prev = self._get_value(condition.indicator1, index - 1)
             val2_prev = self._get_value(condition.indicator2, index - 1)
-            if val1_prev is None or val2_prev is None: return False
-            if condition.operator == OperatorEnum.CROSSES_ABOVE: return val1_prev < val2_prev and val1_curr > val2_curr
-            if condition.operator == OperatorEnum.CROSSES_BELOW: return val1_prev > val2_prev and val1_curr < val2_curr
-        if condition.operator == OperatorEnum.IS_ABOVE: return val1_curr > val2_curr
-        if condition.operator == OperatorEnum.IS_BELOW: return val1_curr < val2_curr
+            if val1_prev is None or val2_prev is None:
+                return False
+
+            if condition.operator == OperatorEnum.CROSSES_ABOVE:
+                return val1_prev <= val2_prev and val1_curr > val2_curr
+            elif condition.operator == OperatorEnum.CROSSES_BELOW:
+                return val1_prev >= val2_prev and val1_curr < val2_curr
+
+        # 범위 연산자
+        elif condition.operator == OperatorEnum.BETWEEN:
+            if condition.indicator3 is None:
+                return False
+            val3 = self._get_value(condition.indicator3, index)
+            if val3 is None:
+                return False
+            lower = min(val2_curr, val3)
+            upper = max(val2_curr, val3)
+            return lower < val1_curr < upper
+
+        elif condition.operator == OperatorEnum.OUTSIDE:
+            if condition.indicator3 is None:
+                return False
+            val3 = self._get_value(condition.indicator3, index)
+            if val3 is None:
+                return False
+            lower = min(val2_curr, val3)
+            upper = max(val2_curr, val3)
+            return val1_curr < lower or val1_curr > upper
+
+        # 변화율 연산자
+        elif condition.operator in [OperatorEnum.PERCENT_CHANGE_ABOVE, OperatorEnum.PERCENT_CHANGE_BELOW]:
+            lookback = condition.lookback_period or 1
+            if index < lookback:
+                return False
+
+            val1_prev = self._get_value(condition.indicator1, index - lookback)
+            if val1_prev is None or val1_prev == 0:
+                return False
+
+            # 변화율 계산 (%)
+            pct_change = ((val1_curr - val1_prev) / val1_prev) * 100
+            threshold = val2_curr  # indicator2는 기준 변화율 (%)
+
+            if condition.operator == OperatorEnum.PERCENT_CHANGE_ABOVE:
+                return pct_change > threshold
+            elif condition.operator == OperatorEnum.PERCENT_CHANGE_BELOW:
+                return pct_change < threshold
+
+        # 연속 조건 연산자
+        elif condition.operator in [OperatorEnum.CONSECUTIVE_ABOVE, OperatorEnum.CONSECUTIVE_BELOW]:
+            lookback = condition.lookback_period or 3
+            if index < lookback - 1:
+                return False
+
+            # lookback 기간 동안 모든 값이 조건을 만족하는지 확인
+            for i in range(lookback):
+                curr_index = index - i
+                val1 = self._get_value(condition.indicator1, curr_index)
+                val2 = self._get_value(condition.indicator2, curr_index)
+
+                if val1 is None or val2 is None:
+                    return False
+
+                if condition.operator == OperatorEnum.CONSECUTIVE_ABOVE:
+                    if val1 <= val2:
+                        return False
+                elif condition.operator == OperatorEnum.CONSECUTIVE_BELOW:
+                    if val1 >= val2:
+                        return False
+
+            return True
+
         return False
 
     def _check_condition_group(self, group: ConditionGroupSchema, index: int) -> bool:
