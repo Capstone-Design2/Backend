@@ -14,6 +14,8 @@ from .strategy import router as strategy_router
 from .ticker import router as ticker_router
 from .user import router as user_router
 from .tradingview import router as tradingview_router
+from .paper_trading import router as paper_trading_router
+from . import websocket
 
 __all__ = [
     "user_router",
@@ -22,6 +24,8 @@ __all__ = [
     "price_router",
     "strategy_router",
     "tradingview_router",
+    "paper_trading_router",
+    "websocket",
 ]
 
 
