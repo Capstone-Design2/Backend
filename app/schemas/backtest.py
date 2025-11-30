@@ -6,11 +6,54 @@ from enum import Enum
 class OperatorEnum(str, Enum):
     """
     조건에 사용될 연산자를 정의하는 Enum
+
+    기본 비교:
+    - is_above: 초과 (>)
+    - is_below: 미만 (<)
+    - is_above_or_equal: 이상 (>=)
+    - is_below_or_equal: 이하 (<=)
+    - equals: 같음 (==)
+    - not_equals: 다름 (!=)
+
+    크로스 (추세 전환):
+    - crosses_above: 하향에서 상향으로 교차
+    - crosses_below: 상향에서 하향으로 교차
+
+    범위 체크:
+    - between: 두 값 사이 (하한 < 값 < 상한)
+    - outside: 두 값 밖 (값 < 하한 OR 값 > 상한)
+
+    변화율:
+    - percent_change_above: N일 대비 변화율이 X% 초과
+    - percent_change_below: N일 대비 변화율이 X% 미만
+
+    연속 조건:
+    - consecutive_above: N일 연속 상위 유지
+    - consecutive_below: N일 연속 하위 유지
     """
+    # 기본 비교 연산자
     IS_ABOVE = "is_above"
     IS_BELOW = "is_below"
+    IS_ABOVE_OR_EQUAL = "is_above_or_equal"
+    IS_BELOW_OR_EQUAL = "is_below_or_equal"
+    EQUALS = "equals"
+    NOT_EQUALS = "not_equals"
+
+    # 크로스 연산자
     CROSSES_ABOVE = "crosses_above"
     CROSSES_BELOW = "crosses_below"
+
+    # 범위 연산자
+    BETWEEN = "between"
+    OUTSIDE = "outside"
+
+    # 변화율 연산자
+    PERCENT_CHANGE_ABOVE = "percent_change_above"
+    PERCENT_CHANGE_BELOW = "percent_change_below"
+
+    # 연속 조건 연산자
+    CONSECUTIVE_ABOVE = "consecutive_above"
+    CONSECUTIVE_BELOW = "consecutive_below"
 
 
 class IndicatorSchema(BaseModel):
@@ -28,13 +71,35 @@ class IndicatorSchema(BaseModel):
 class ConditionSchema(BaseModel):
     """
     매수/매도 조건을 정의하는 스키마
+
+    기본 사용법:
     - indicator1: 비교할 첫 번째 지표 (e.g., 'SMA_short', 'price')
     - operator: 비교 연산자
-    - indicator2: 비교할 두 번째 지표 (e.g., 'SMA_long', 'bbands_upper')
+    - indicator2: 비교할 두 번째 지표 (e.g., 'SMA_long', '30')
+
+    범위 연산자 (between, outside):
+    - indicator1: 비교 대상 지표
+    - operator: 'between' 또는 'outside'
+    - indicator2: 하한값
+    - indicator3: 상한값
+
+    변화율 연산자 (percent_change_above/below):
+    - indicator1: 비교 대상 지표
+    - operator: 'percent_change_above' 또는 'percent_change_below'
+    - indicator2: 변화율 기준값 (예: '5' = 5%)
+    - lookback_period: 몇 일 전과 비교할지 (기본값: 1)
+
+    연속 조건 연산자 (consecutive_above/below):
+    - indicator1: 비교 대상 지표
+    - operator: 'consecutive_above' 또는 'consecutive_below'
+    - indicator2: 비교 기준 지표
+    - lookback_period: 연속 일수 (기본값: 3)
     """
     indicator1: str = Field(description="비교할 첫 번째 지표 이름 또는 'price'")
     operator: OperatorEnum = Field(description="비교 연산자")
     indicator2: str = Field(description="비교할 두 번째 지표 이름 또는 상수값")
+    indicator3: Optional[str] = Field(None, description="범위 연산자(between/outside)의 상한값")
+    lookback_period: Optional[int] = Field(None, description="변화율/연속 조건 연산자의 기간")
 
 
 class ConditionGroupSchema(BaseModel):
@@ -150,19 +215,19 @@ class RunBacktestRequest(BaseModel):
                 "start_date": "2023-01-01",
                 "end_date": "2024-12-31",
                 "strategy_definition": {
-                    "strategy_name": "SMA Cross Demo",
+                    "strategy_name": "Simple SMA Cross Strategy (Guaranteed Trades)",
                     "indicators": [
-                        {"name": "sma20", "type": "SMA", "params": {"length": 20}},
-                        {"name": "sma60", "type": "SMA", "params": {"length": 60}}
+                        {"name": "sma5", "type": "SMA", "params": {"length": 5}},
+                        {"name": "sma20", "type": "SMA", "params": {"length": 20}}
                     ],
                     "buy_conditions": {
                         "all": [
-                            {"indicator1": "sma20", "operator": "crosses_above", "indicator2": "sma60"}
+                            {"indicator1": "sma5", "operator": "crosses_above", "indicator2": "sma20"}
                         ]
                     },
                     "sell_conditions": {
-                        "any": [
-                            {"indicator1": "sma20", "operator": "crosses_below", "indicator2": "sma60"}
+                        "all": [
+                            {"indicator1": "sma5", "operator": "crosses_below", "indicator2": "sma20"}
                         ]
                     },
                     "trade_settings": {"order_amount_percent": 100.0}
