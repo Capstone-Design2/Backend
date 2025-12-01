@@ -53,9 +53,10 @@ class KISAuthManager:
             "appkey": self.appkey,
             "appsecret": self.appsecret,
         }
-        
+
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
+            # SSL 검증 비활성화 (모의투자 서버 인증서 문제 회피)
+            async with httpx.AsyncClient(timeout=10, verify=False) as client:
                 r = await client.post(url, json=payload)
                 r.raise_for_status()
                 data = r.json()
@@ -97,10 +98,13 @@ class KISAuthManager:
 
     async def get_access_token(self) -> str:
         if self._is_valid():
+            logger.debug("캐시된 Access Token 사용 (만료: %s)", self._token_expires_at.isoformat())
             return self._access_token  # type: ignore
         async with self._lock:
             if self._is_valid():
+                logger.debug("캐시된 Access Token 사용 (만료: %s)", self._token_expires_at.isoformat())
                 return self._access_token  # type: ignore
+            logger.info("Access Token 만료, 새로 발급 시도...")
             await self._fetch_new_token()
             return self._access_token  # type: ignore
 
@@ -116,7 +120,8 @@ class KISAuthManager:
             "appkey": self.appkey,
             "appsecret": self.appsecret,   # ← secretkey → appsecret 로 정렬
         }
-        async with httpx.AsyncClient(timeout=10) as client:
+        # SSL 검증 비활성화 (모의투자 서버 인증서 문제 회피)
+        async with httpx.AsyncClient(timeout=10, verify=False) as client:
             r = await client.post(url, json=payload)
             r.raise_for_status()
             data = r.json()

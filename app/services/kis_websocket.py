@@ -19,8 +19,9 @@ from app.core.events import get_price_event_bus, PriceEvent
 
 logger = logging.getLogger(__name__)
 
-# KIS WebSocket URL (실전투자 기준)
-KIS_WS_URL = KIS_DOMAIN.replace("https://", "wss://").replace("http://", "ws://")
+# KIS WebSocket URL - 포트 번호 제거 필요 (표준 포트 443 사용)
+_ws_url = KIS_DOMAIN.replace("https://", "wss://").replace("http://", "ws://")
+KIS_WS_URL = _ws_url.replace(":9443", "")  # 포트 번호 제거
 
 
 class PriceData:
@@ -78,7 +79,19 @@ class KISWebSocketClient:
 
             # WebSocket 연결
             ws_url = f"{KIS_WS_URL}/tryitout/H0STCNT0"
-            self.ws = await websockets.connect(ws_url, ping_interval=20, ping_timeout=10)
+
+            # SSL 검증 비활성화 (모의투자 서버의 인증서 문제 회피)
+            import ssl
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+
+            self.ws = await websockets.connect(
+                ws_url,
+                ping_interval=20,
+                ping_timeout=10,
+                ssl=ssl_context
+            )
             self.is_connected = True
             self.current_retry = 0
 

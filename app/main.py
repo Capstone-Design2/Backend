@@ -28,6 +28,9 @@ from app.utils.seed_data import init_seed_data
 from app.services.kis_websocket import get_kis_ws_client
 from app.routers.websocket import broadcast_worker
 from app.services.order_executor import get_order_executor
+from app.services.mock_price_generator import get_mock_price_generator
+from app.services.kis_price_poller import get_kis_price_poller
+from app.services.price_data_recorder import get_price_data_recorder
 
 
 # ----------------------------------------------------------------------
@@ -60,23 +63,75 @@ async def lifespan(app: FastAPI):
     tasks.append(executor_task)
     logger.info("Order Executor 시작됨")
 
-    # KIS WebSocket Client (선택적 - 환경 변수로 제어 가능)
-    if environ.get("ENABLE_KIS_WEBSOCKET", "false").lower() == "true":
+    # Price Data Recorder (실시간 시세 DB 저장)
+    save_realtime_to_db = environ.get("SAVE_REALTIME_TO_DB", "true").lower() == "true"
+    if save_realtime_to_db:
+        price_recorder = get_price_data_recorder()
+        recorder_task = asyncio.create_task(price_recorder.run())
+        tasks.append(recorder_task)
+        logger.info("Price Data Recorder 시작됨 - 실시간 시세를 DB에 1분봉으로 저장합니다.")
+
+    # KIS Price Source: WebSocket(실전투자) / REST Polling(모의투자) / Mock
+    use_mock = environ.get("USE_MOCK_PRICE", "false").lower() == "true"
+    use_kis_rest = environ.get("USE_KIS_REST_POLLING", "false").lower() == "true"
+    enable_kis_ws = environ.get("ENABLE_KIS_WEBSOCKET", "false").lower() == "true"
+    auto_fallback = environ.get("AUTO_FALLBACK_TO_MOCK", "false").lower() == "true"
+    default_tickers_str = environ.get("KIS_WS_DEFAULT_TICKERS", "005930,000660")
+
+    if use_kis_rest and not use_mock:
+        # KIS REST API Polling (모의투자 계좌에서 실제 시세 사용)
+        default_tickers = default_tickers_str.split(",")
+        poll_interval = float(environ.get("KIS_POLL_INTERVAL", "5"))
+        kis_poller = get_kis_price_poller(poll_interval=poll_interval)
+        kis_poller.subscribe(default_tickers)
+
+        async def poller_task():
+            await kis_poller.run()
+
+        poller_task_obj = asyncio.create_task(poller_task())
+        tasks.append(poller_task_obj)
+        logger.info(f"KIS REST API Poller 시작됨 (모의투자 실시간 시세, 종목: {', '.join(default_tickers)})")
+
+    elif enable_kis_ws and not use_mock:
+        # 실제 KIS WebSocket 사용
         kis_ws_client = get_kis_ws_client()
 
         async def kis_ws_task():
             try:
                 await kis_ws_client.connect()
                 # 기본 구독 종목 (환경 변수에서 읽기)
-                default_tickers = environ.get("KIS_WS_DEFAULT_TICKERS", "005930,000660").split(",")
+                default_tickers = default_tickers_str.split(",")
                 await kis_ws_client.subscribe(default_tickers)
                 await kis_ws_client.listen()
             except Exception as e:
-                logger.error(f"KIS WebSocket 태스크 오류: {e}")
+                logger.error(f"KIS WebSocket 연결 실패: {e}")
+
+                if auto_fallback:
+                    logger.info("AUTO_FALLBACK_TO_MOCK=true, Mock Price Generator로 전환합니다...")
+                    # KIS 연결 실패 시 Mock Generator로 대체
+                    default_tickers = default_tickers_str.split(",")
+                    mock_generator = get_mock_price_generator(tickers=default_tickers)
+                    await mock_generator.run(interval=2.0)
+                else:
+                    logger.error("KIS WebSocket 연결 실패. AUTO_FALLBACK_TO_MOCK=false이므로 종료합니다.")
+                    logger.error("도메인이 올바른지 확인하세요: 실전투자(openapi) vs 모의투자(openapivts)")
+                    raise
 
         kis_task = asyncio.create_task(kis_ws_task())
         tasks.append(kis_task)
-        logger.info("KIS WebSocket 클라이언트 시작됨")
+        logger.info("KIS WebSocket 클라이언트 시작 시도 중...")
+
+    elif use_mock:
+        # Mock Price Generator 직접 사용
+        default_tickers = default_tickers_str.split(",")
+        mock_generator = get_mock_price_generator(tickers=default_tickers)
+
+        async def mock_task():
+            await mock_generator.run(interval=2.0)
+
+        mock_task_obj = asyncio.create_task(mock_task())
+        tasks.append(mock_task_obj)
+        logger.info("Mock Price Generator 시작됨 (USE_MOCK_PRICE=true)")
 
     yield
 
