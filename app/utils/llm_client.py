@@ -10,7 +10,18 @@ from google.genai.types import (GenerateContentConfig, GoogleSearch,
 class GeminiClient:
     """Gemini API 클라이언트 클래스"""
 
-    _api_key: Optional[str] = os.getenv("GOOGLE_API_KEY")
+    # 기본 키 + 최대 3개까지만 순환 (1→2→3→1)
+    _api_keys: list[str] = [
+        k.strip()
+        for k in [
+            os.getenv("GOOGLE_API_KEY"),
+            os.getenv("GOOGLE_API_KEY_2"),
+            # os.getenv("GOOGLE_API_KEY_3"),
+        ]
+        if k
+    ]
+    _api_key_index: int = 0
+    _api_key: Optional[str] = _api_keys[0] if _api_keys else None
     _model_id: str = "gemini-2.5-flash"
     _client: Optional[genai.Client] = None
 
@@ -34,6 +45,25 @@ class GeminiClient:
         cls._api_key = new_key
         cls._client = None  # 새로운 키로 새 클라이언트 생성
         print(f"[Gemini] API Key 변경 완료")
+
+    @classmethod
+    def _rotate_api_key(cls) -> bool:
+        """429 발생 시 1→2→3→1 순환"""
+        if not cls._api_keys:
+            return False
+
+        cls._api_key_index = (cls._api_key_index + 1) % len(cls._api_keys)
+        next_key = cls._api_keys[cls._api_key_index]
+        cls._change_api_key(next_key)
+        print(
+            f"[Gemini] 키 전환: {cls._api_key_index + 1}/{len(cls._api_keys)}번 키 사용"
+        )
+        return True
+
+    @staticmethod
+    def _is_rate_limit_error(exc: Exception) -> bool:
+        # 심플: code가 429이거나 메시지에 429가 포함될 때만 감지
+        return getattr(exc, "code", None) == 429 or "429" in str(exc)
 
     # ------------------------------------------------------------
     # Retry 함수
@@ -62,6 +92,12 @@ class GeminiClient:
             except Exception as e:
                 last_error = e
                 is_last = (attempt == max_retries - 1)
+
+                if cls._is_rate_limit_error(e):
+                    rotated = cls._rotate_api_key()
+                    if rotated:
+                        # 새 키로 바로 재시도
+                        continue
 
                 if is_last:
                     raise
