@@ -1,20 +1,18 @@
 # app/services/strategy.py
 import logging
+import uuid
 from typing import List, Optional, Tuple
 
-from app.repositories.strategy import StrategyRepository
-from app.schemas.strategy import (StrategyChatRequest, StrategyRequest,
-                                  StrategyResponse, StrategyUpdateRequest)
+from app.repositories.strategy import (StrategyRepository,
+                                       StrategyStateRepository,
+                                       get_strategy_state_repo)
+from app.schemas.strategy import (StrategyChatRequest, StrategyConditionState,
+                                  StrategyRequest, StrategyResponse,
+                                  StrategyUpdateRequest)
 from app.schemas.user import UserResponse
 from app.utils.llm_client import GeminiClient
-from fastapi import HTTPException, status,Depends
+from fastapi import Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-
-
-from app.schemas.strategy import StrategyConditionState, StrategyChatRequest
-from app.repositories.strategy import StrategyStateRepository
-from app.repositories.strategy import get_strategy_state_repo
-import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +131,7 @@ class StrategyService:
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
-    
+
     async def strategy_chat(self, request: StrategyChatRequest):
         session_id = request.session_id or str(uuid.uuid4())
 
@@ -153,6 +151,7 @@ class StrategyService:
                 detail=f"LLM 호출 중 오류가 발생했습니다: {e}",
             )
 
+        print(parsed)
         # LLM 응답 기반으로 새로운 상태 구성
         new_state = StrategyConditionState(**parsed["conditions"])
 

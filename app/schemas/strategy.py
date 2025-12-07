@@ -25,17 +25,19 @@ class StrategyResponse(BaseModel):
 
 
 class StrategyChatRequest(BaseModel):
-    session_id: Optional[str] = Field(default=None) #서버가 누구인지 알기 위한 id
+    session_id: Optional[str] = Field(default=None)  # 서버가 누구인지 알기 위한 id
     content: str = Field(description="메시지")
 
 # 전략 상태 모델 (조건 충족 여부 + 상세 내용)
+
+
 class ConditionDetail(BaseModel):
     filled: bool = False
     description: Optional[str] = None
 
+
 class StrategyConditionState(BaseModel):
     indicators: ConditionDetail = Field(default_factory=ConditionDetail)
-    buy_entry: ConditionDetail = Field(default_factory=ConditionDetail)
-    buy_exit: ConditionDetail = Field(default_factory=ConditionDetail)
-    sell_entry: ConditionDetail = Field(default_factory=ConditionDetail)
-    sell_exit: ConditionDetail = Field(default_factory=ConditionDetail)
+    buy_conditions: ConditionDetail = Field(default_factory=ConditionDetail)
+    sell_conditions: ConditionDetail = Field(default_factory=ConditionDetail)
+    trade_settings: ConditionDetail = Field(default_factory=ConditionDetail)
