@@ -208,3 +208,24 @@ class BacktestRepository:
 
         result = await db.execute(stmt)
         return result.scalars().all()
+
+    async def delete_backtest_result(
+        self,
+        db: AsyncSession,
+        result_id: int
+    ) -> bool:
+        """
+        백테스트 결과를 삭제합니다.
+        """
+        from sqlmodel import select
+
+        stmt = select(BacktestResult).where(BacktestResult.result_id == result_id)
+        result = await db.execute(stmt)
+        backtest_result = result.scalar_one_or_none()
+
+        if not backtest_result:
+            return False
+
+        await db.delete(backtest_result)
+        await db.commit()
+        return True
