@@ -285,14 +285,20 @@ class BacktestService:
             return {
                 "total_return": 0,
                 "win_rate": 0,
+                "profit_factor": 0,
                 "max_drawdown": 0,
                 "cagr": 0,
                 "sharpe_ratio": 0,
+                "sortino_ratio": 0,
+                "var_95": 0,
+                "cvar_95": 0,
                 "final_portfolio_value": self.initial_cash,
                 "completed_trades": 0,
                 "buy_count": 0,
                 "sell_count": 0,
-                "total_actions": 0
+                "total_actions": 0,
+                "drawdown_series": [],
+                "position_history": []
             }
 
         # 1. 총수익률
@@ -307,17 +313,40 @@ class BacktestService:
         total_actions = buy_count + sell_count
         completed_trades = sell_count  # 완료된 라운드 트립
 
-        # 3. 승률
+        # 3. 승률 및 손익비
         winning_trades = [t for t in sell_trades if t.get('profit', 0) > 0]
+        losing_trades = [t for t in sell_trades if t.get('profit', 0) < 0]
         win_rate = len(winning_trades) / len(sell_trades) if sell_trades else 0
 
-        # 4. 최대 낙폭 (MDD)
+        # 손익비 (Profit Factor) = 총 이익 / 총 손실
+        total_profit = sum(t.get('profit', 0) for t in winning_trades)
+        total_loss = abs(sum(t.get('profit', 0) for t in losing_trades))
+
+        if total_loss > 0:
+            profit_factor = total_profit / total_loss
+        elif total_profit > 0:
+            profit_factor = float('inf')
+        else:
+            profit_factor = 0
+
+        # 4. 포트폴리오 데이터프레임 준비
         portfolio_df = pd.DataFrame(self.portfolio_history).set_index('date')['value']
+
+        # 5. 최대 낙폭 (MDD) 및 드로우다운 시계열
         peak = portfolio_df.cummax()
         drawdown = (portfolio_df - peak) / peak
         max_drawdown = drawdown.min() if not drawdown.empty else 0
 
-        # 5. CAGR (Compound Annual Growth Rate)
+        # 드로우다운 시계열 데이터
+        drawdown_series = [
+            {
+                "timestamp": idx.isoformat(),
+                "drawdown": float(val)
+            }
+            for idx, val in drawdown.items()
+        ]
+
+        # 6. CAGR (Compound Annual Growth Rate)
         if len(self.portfolio_history) > 1:
             start_date = self.portfolio_history[0]['date']
             end_date = self.portfolio_history[-1]['date']
@@ -331,39 +360,82 @@ class BacktestService:
         else:
             cagr = 0
 
-        # 6. Sharpe Ratio (일간 수익률 기준)
-        if len(self.portfolio_history) > 1:
-            # 일간 수익률 계산
-            daily_returns = portfolio_df.pct_change().dropna()
+        # 7. 일간 수익률 계산
+        daily_returns = portfolio_df.pct_change().dropna()
 
-            if len(daily_returns) > 0:
-                # 평균 일간 수익률
-                mean_daily_return = daily_returns.mean()
-                # 일간 수익률 표준편차
-                std_daily_return = daily_returns.std()
+        # 8. Sharpe Ratio (무위험 수익률 0 가정)
+        sharpe_ratio = 0
+        if len(daily_returns) > 0:
+            mean_daily_return = daily_returns.mean()
+            std_daily_return = daily_returns.std()
+            if std_daily_return > 0:
+                sharpe_ratio = (mean_daily_return / std_daily_return) * np.sqrt(252)
 
-                if std_daily_return > 0:
-                    # 연율화된 Sharpe Ratio (무위험 수익률 0으로 가정)
-                    # 252 거래일 기준
-                    sharpe_ratio = (mean_daily_return / std_daily_return) * np.sqrt(252)
-                else:
-                    sharpe_ratio = 0
-            else:
-                sharpe_ratio = 0
-        else:
-            sharpe_ratio = 0
+        # 9. Sortino Ratio (하방 리스크만 고려)
+        sortino_ratio = 0
+        if len(daily_returns) > 0:
+            mean_daily_return = daily_returns.mean()
+            # 하방 편차 계산 (음수 수익률만)
+            downside_returns = daily_returns[daily_returns < 0]
+            if len(downside_returns) > 0:
+                downside_std = downside_returns.std()
+                if downside_std > 0:
+                    sortino_ratio = (mean_daily_return / downside_std) * np.sqrt(252)
+
+        # 10. VaR (Value at Risk) 95% 신뢰수준
+        var_95 = 0
+        if len(daily_returns) > 0:
+            var_95 = daily_returns.quantile(0.05)  # 5% 최악의 경우
+
+        # 11. CVaR (Conditional VaR / Expected Shortfall) 95% 신뢰수준
+        cvar_95 = 0
+        if len(daily_returns) > 0:
+            cvar_95 = daily_returns[daily_returns <= var_95].mean()
+
+        # 12. 포지션 히스토리 (매일 보유 여부)
+        position_history = []
+        if self.historical_data is not None:
+            current_position = None
+            for i in range(len(self.historical_data)):
+                date = self.historical_data.index[i]
+
+                # 해당 날짜의 매수/매도 체크
+                buy_today = any(t['date'] == date and t['type'] == 'buy' for t in self.trades)
+                sell_today = any(t['date'] == date and t['type'] == 'sell' for t in self.trades)
+
+                if buy_today:
+                    buy_trade = next(t for t in self.trades if t['date'] == date and t['type'] == 'buy')
+                    current_position = {
+                        "quantity": buy_trade['quantity'],
+                        "entry_price": buy_trade['price']
+                    }
+                elif sell_today:
+                    current_position = None
+
+                position_history.append({
+                    "timestamp": date.isoformat(),
+                    "has_position": current_position is not None,
+                    "quantity": current_position['quantity'] if current_position else 0,
+                    "entry_price": current_position['entry_price'] if current_position else 0
+                })
 
         return {
             "total_return": total_return,
             "win_rate": win_rate,
+            "profit_factor": profit_factor,
             "max_drawdown": max_drawdown,
             "cagr": cagr,
             "sharpe_ratio": sharpe_ratio,
+            "sortino_ratio": sortino_ratio,
+            "var_95": var_95,
+            "cvar_95": cvar_95,
             "final_portfolio_value": final_portfolio_value,
             "completed_trades": completed_trades,
             "buy_count": buy_count,
             "sell_count": sell_count,
-            "total_actions": total_actions
+            "total_actions": total_actions,
+            "drawdown_series": drawdown_series,
+            "position_history": position_history
         }
 
     async def run(self, ticker: str, start_date: str, end_date: str, user_id: int) -> Dict:
@@ -455,6 +527,7 @@ class BacktestService:
                 "strategy_name": self.strategy.strategy_name,
                 "total_return": performance['total_return'],
                 "win_rate": performance['win_rate'],
+                "profit_factor": performance['profit_factor'],
                 "completed_trades": performance['completed_trades'],
                 "buy_count": performance['buy_count'],
                 "sell_count": performance['sell_count'],
@@ -463,6 +536,11 @@ class BacktestService:
                 "initial_cash": self.initial_cash,
                 "cagr": performance['cagr'],
                 "sharpe_ratio": performance['sharpe_ratio'],
+                "sortino_ratio": performance['sortino_ratio'],
+                "var_95": performance['var_95'],
+                "cvar_95": performance['cvar_95'],
+                "drawdown_series": performance['drawdown_series'],
+                "position_history": performance['position_history'],
                 "trades": [
                     {
                         "type": t['type'],
@@ -512,12 +590,21 @@ class BacktestService:
                 print(f"  Position Value     : {final_position_value:>15,.0f} KRW ({int(self.position['quantity'])} shares)")
             print(f"  Total Portfolio    : {performance['final_portfolio_value']:>15,.0f} KRW")
             print(f"  {'─'*78}")
+            print(f"  [수익성 지표]")
             print(f"  Total Return       : {performance['total_return']:>14.2%}")
             print(f"  CAGR               : {performance['cagr']:>14.2%}")
-            print(f"  Sharpe Ratio       : {performance['sharpe_ratio']:>14.2f}")
-            print(f"  Max Drawdown       : {performance['max_drawdown']:>14.2%}")
             print(f"  Win Rate           : {performance['win_rate']:>14.2%}")
+            pf_display = f"{performance['profit_factor']:.2f}" if performance['profit_factor'] != float('inf') else "∞"
+            print(f"  Profit Factor      : {pf_display:>14}")
             print(f"  {'─'*78}")
+            print(f"  [리스크 지표]")
+            print(f"  Sharpe Ratio       : {performance['sharpe_ratio']:>14.2f}")
+            print(f"  Sortino Ratio      : {performance['sortino_ratio']:>14.2f}")
+            print(f"  Max Drawdown       : {performance['max_drawdown']:>14.2%}")
+            print(f"  VaR (95%)          : {performance['var_95']:>14.2%}")
+            print(f"  CVaR (95%)         : {performance['cvar_95']:>14.2%}")
+            print(f"  {'─'*78}")
+            print(f"  [거래 통계]")
             print(f"  Buy Actions        : {performance['buy_count']:>14}")
             print(f"  Sell Actions       : {performance['sell_count']:>14}")
             print(f"  Total Actions      : {performance['total_actions']:>14}")

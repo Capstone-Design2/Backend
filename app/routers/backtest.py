@@ -1,5 +1,5 @@
 # app/routers/backtest.py
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import HTTPException, Depends, Query
 from typing import Dict, Any, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,11 +14,9 @@ from app.repositories.backtest import BacktestRepository
 from app.models.user import User
 from app.models.backtest import BacktestStatus
 from app.utils.dependencies import get_current_user
+from app.utils.router import get_router
 
-router = APIRouter(
-    prefix="/backtest",
-    tags=["Backtest"],
-)
+router = get_router("backtest")
 
 @router.post("/run", response_model=Dict[str, Any])
 async def run_backtest(
