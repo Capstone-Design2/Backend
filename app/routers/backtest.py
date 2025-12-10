@@ -1,5 +1,5 @@
 # app/routers/backtest.py
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import HTTPException, Depends, Query
 from typing import Dict, Any, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,11 +14,9 @@ from app.repositories.backtest import BacktestRepository
 from app.models.user import User
 from app.models.backtest import BacktestStatus
 from app.utils.dependencies import get_current_user
+from app.utils.router import get_router
 
-router = APIRouter(
-    prefix="/backtest",
-    tags=["Backtest"],
-)
+router = get_router("backtest")
 
 @router.post("/run", response_model=Dict[str, Any])
 async def run_backtest(
@@ -129,3 +127,33 @@ async def get_user_backtest_jobs(
         offset=offset
     )
     return jobs
+
+
+@router.delete("/results/{result_id}", response_model=Dict[str, Any])
+async def delete_backtest_result(
+    result_id: int,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    백테스트 결과를 삭제합니다.
+    """
+    repo = BacktestRepository()
+
+    # 결과 조회하여 권한 확인
+    result = await repo.get_backtest_result_by_id(db=db, result_id=result_id)
+
+    if not result:
+        raise HTTPException(status_code=404, detail=f"Result ID {result_id}를 찾을 수 없습니다.")
+
+    # 권한 확인 (본인의 결과만 삭제 가능)
+    if result.user_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="해당 백테스트 결과를 삭제할 권한이 없습니다.")
+
+    # 삭제 실행
+    success = await repo.delete_backtest_result(db=db, result_id=result_id)
+
+    if not success:
+        raise HTTPException(status_code=500, detail="백테스트 결과 삭제에 실패했습니다.")
+
+    return {"message": "백테스트 결과가 삭제되었습니다.", "result_id": result_id}

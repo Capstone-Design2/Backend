@@ -120,15 +120,16 @@ async def market_websocket(websocket: WebSocket, ticker_code: str):
 
     Protocol:
         - Client → Server: ping (keep-alive)
-        - Server → Client: JSON 메시지
+        - Server → Client: JSON 메시지 (KIS API 필드명 사용)
           {
             "type": "price",
             "ticker_code": "005930",
-            "price": 84600,
-            "volume": 1234,
-            "timestamp": "2025-11-30T12:34:56Z",
-            "change": -400,
-            "change_rate": -0.47
+            "stck_prpr": "84600",
+            "prdy_vrss": "-400",
+            "prdy_vrss_sign": "5",
+            "prdy_ctrt": "-0.47",
+            "acml_vol": "1234",
+            "timestamp": "2025-11-30T12:34:56Z"
           }
     """
     await manager.connect(ticker_code, websocket)
@@ -172,19 +173,30 @@ async def broadcast_worker():
             # 이벤트 수신 대기
             event: PriceEvent = await queue.get()
 
-            # JSON 메시지 생성
+            # JSON 메시지 생성 (프론트엔드가 기대하는 KIS API 필드명 사용)
+            change_sign = "2" if float(event.change) >= 0 else "5"  # 2=상승, 5=하락
             message = {
                 "type": "price",
                 "ticker_code": event.ticker_code,
-                "price": float(event.price),
-                "volume": event.volume,
+                "stck_prpr": str(int(event.price)),  # 현재가
+                "prdy_vrss": str(int(event.change)),  # 전일대비
+                "prdy_vrss_sign": change_sign,  # 전일대비부호
+                "prdy_ctrt": f"{float(event.change_rate) * 100:.2f}",  # 전일대비율 (%)
+                "acml_vol": str(event.volume),  # 누적거래량
+                "stck_oprc": str(int(event.price)),  # 시가 (동일값 사용)
+                "stck_hgpr": str(int(event.price)),  # 고가 (동일값 사용)
+                "stck_lwpr": str(int(event.price)),  # 저가 (동일값 사용)
+                "cntg_vol": "0",  # 체결거래량
                 "timestamp": event.timestamp.isoformat(),
-                "change": float(event.change),
-                "change_rate": float(event.change_rate),
             }
 
             # 해당 종목 구독자에게 브로드캐스트
             await manager.broadcast(event.ticker_code, message)
+
+            logger.debug(
+                f"WebSocket 브로드캐스트: {event.ticker_code} = "
+                f"₩{message['stck_prpr']} ({message['prdy_vrss']}, {message['prdy_ctrt']}%)"
+            )
 
     except asyncio.CancelledError:
         logger.info("WebSocket 브로드캐스트 워커 종료")
