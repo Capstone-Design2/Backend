@@ -42,7 +42,7 @@ async def get_or_create_default_user(db: AsyncSession) -> User:
         default_user = User(
             name="admin",
             email="admin@capslock.com",
-            password_hash=User.hash_password("capslock123!@#"),
+            password_hash=User.hash_password("asdf1234"),
             is_active=True,
             role="ADMIN"
         )
