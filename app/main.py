@@ -178,11 +178,12 @@ app = FastAPI(
 # ----------------------------------------------------------------------
 # User 인증 생략
 # ----------------------------------------------------------------------
-if settings.SKIP_AUTH and settings.DEPLOY_PHASE in ("dev", "local"):
-    def _fake_current_user():
-        # 필요하면 DB에서 1번 유저를 읽어 반환하도록 바꿔도 됨
-        return SimpleNamespace(user_id=1, email="dev@example.com", name="Dev User", role="admin")
-    app.dependency_overrides[get_current_user] = _fake_current_user
+# 주석 처리: 실제 JWT 인증을 사용하도록 변경
+# if settings.SKIP_AUTH and settings.DEPLOY_PHASE in ("dev", "local"):
+#     def _fake_current_user():
+#         # 필요하면 DB에서 1번 유저를 읽어 반환하도록 바꿔도 됨
+#         return SimpleNamespace(user_id=1, email="dev@example.com", name="Dev User", role="admin")
+#     app.dependency_overrides[get_current_user] = _fake_current_user
 
 # ----------------------------------------------------------------------
 # 로거 설정
