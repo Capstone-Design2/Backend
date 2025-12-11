@@ -1,142 +1,148 @@
 [
   {
     "strategy_name": "볼린저 중심선 재돌파 추세 추종",
+    "description": "볼린저 밴드 하단/상단 터치 후 중심선 재돌파 시 매매",
     "indicators": [
       {
-        "key": "bb.20",
-        "type": "bollinger_bands",
-        "params": { "length": 20, "stddev": 2 }
+        "name": "bb",
+        "type": "BBANDS",
+        "params": {
+          "std": 2,
+          "length": 20
+        }
       }
     ],
-    "rules": {
-      "buy_condition": {
-        "entry": [
-          {
-            "type": "touched_within",
-            "within": 10,
-            "condition": {
-              "type": "compare",
-              "lhs": "close",
-              "op": "<=",
-              "rhs": "bb.20.lower"
-            }
-          },
-          { "type": "crosses_above", "lhs": "close", "rhs": "bb.20.middle" }
-        ],
-        "exit": [
-          { "type": "crosses_below", "lhs": "close", "rhs": "bb.20.middle" }
-        ]
-      },
-      "sell_condition": {
-        "entry": [
-          {
-            "type": "touched_within",
-            "within": 10,
-            "condition": {
-              "type": "compare",
-              "lhs": "close",
-              "op": ">=",
-              "rhs": "bb.20.upper"
-            }
-          },
-          { "type": "crosses_below", "lhs": "close", "rhs": "bb.20.middle" }
-        ],
-        "exit": [
-          { "type": "crosses_above", "lhs": "close", "rhs": "bb.20.middle" }
-        ]
-      }
+    "buy_conditions": {
+      "all": [
+        {
+          "indicator1": "close",
+          "operator": "crosses_above",
+          "indicator2": "bb.BBM_20_2"
+        }
+      ]
+    },
+    "sell_conditions": {
+      "all": [
+        {
+          "indicator1": "close",
+          "operator": "crosses_below",
+          "indicator2": "bb.BBM_20_2"
+        }
+      ]
+    },
+    "trade_settings": {
+      "order_amount_percent": 100
     }
   },
-
   {
     "strategy_name": "EMA20/EMA60 골든·데드 크로스",
+    "description": "EMA 20과 EMA 60의 골든 크로스/데드 크로스 전략",
     "indicators": [
-      { "key": "ema.20", "type": "ema", "params": { "length": 20 } },
-      { "key": "ema.60", "type": "ema", "params": { "length": 60 } }
-    ],
-    "rules": {
-      "buy_condition": {
-        "entry": [
-          { "type": "crosses_above", "lhs": "ema.20", "rhs": "ema.60" }
-        ],
-        "exit": [{ "type": "crosses_below", "lhs": "ema.20", "rhs": "ema.60" }]
+      {
+        "name": "ema20",
+        "type": "EMA",
+        "params": {
+          "length": 20
+        }
       },
-      "sell_condition": {
-        "entry": [
-          { "type": "crosses_below", "lhs": "ema.20", "rhs": "ema.60" }
-        ],
-        "exit": [{ "type": "crosses_above", "lhs": "ema.20", "rhs": "ema.60" }]
+      {
+        "name": "ema60",
+        "type": "EMA",
+        "params": {
+          "length": 60
+        }
       }
+    ],
+    "buy_conditions": {
+      "all": [
+        {
+          "indicator1": "ema20",
+          "operator": "crosses_above",
+          "indicator2": "ema60"
+        }
+      ]
+    },
+    "sell_conditions": {
+      "all": [
+        {
+          "indicator1": "ema20",
+          "operator": "crosses_below",
+          "indicator2": "ema60"
+        }
+      ]
+    },
+    "trade_settings": {
+      "order_amount_percent": 100
     }
   },
-
   {
-    "strategy_name": "EMA20 괴리율 평균회귀",
+    "strategy_name": "RSI 과매수/과매도 전략",
+    "description": "RSI 30 이하 매수, 70 이상 매도",
     "indicators": [
-      { "key": "ema.20", "type": "ema", "params": { "length": 20 } }
-    ],
-    "derived": [
       {
-        "key": "dev.ema20",
-        "type": "deviation_pct",
-        "formula": "(close - ema.20) / ema.20 * 100"
+        "name": "rsi14",
+        "type": "RSI",
+        "params": {
+          "length": 14
+        }
       }
     ],
-    "params": { "entry_dev_abs": 0.15, "exit_dev_abs": 0.0 },
-    "rules": {
-      "buy_condition": {
-        "entry": [
-          { "type": "threshold", "lhs": "dev.ema20", "op": "<=", "value": -0.15 }
-        ],
-        "exit": [
-          { "type": "compare", "lhs": "dev.ema20", "op": ">=", "value": 0.0 }
-        ]
-      },
-      "sell_condition": { "entry": [], "exit": [] }
+    "buy_conditions": {
+      "all": [
+        {
+          "indicator1": "rsi14",
+          "operator": "is_below",
+          "indicator2": 30
+        }
+      ]
+    },
+    "sell_conditions": {
+      "all": [
+        {
+          "indicator1": "rsi14",
+          "operator": "is_above",
+          "indicator2": 70
+        }
+      ]
+    },
+    "trade_settings": {
+      "order_amount_percent": 100
     }
   },
-
   {
-    "strategy_name": "볼린저 스퀴즈 돌파 + 밴드워킹",
+    "strategy_name": "MACD 크로스오버 전략",
+    "description": "MACD 라인과 시그널 라인의 크로스 전략",
     "indicators": [
       {
-        "key": "bb.20",
-        "type": "bollinger_bands",
-        "params": { "length": 20, "stddev": 2 }
+        "name": "macd",
+        "type": "MACD",
+        "params": {
+          "fast": 12,
+          "slow": 26,
+          "signal": 9
+        }
       }
     ],
-    "derived": [
-      {
-        "key": "bbwidth.20",
-        "type": "formula",
-        "formula": "(bb.20.upper - bb.20.lower) / bb.20.middle"
-      },
-      {
-        "key": "slope.bb20.mid",
-        "type": "formula",
-        "formula": "bb.20.middle - shift(bb.20.middle, 1)"
-      }
-    ],
-    "params": { "sq_thresh": 0.12 },
-    "rules": {
-      "buy_condition": {
-        "entry": [
-          { "type": "threshold", "lhs": "bbwidth.20", "op": "<=", "value": 0.12 },
-          { "type": "crosses_above", "lhs": "close", "rhs": "bb.20.middle" }
-        ],
-        "exit": [
-          { "type": "crosses_below", "lhs": "close", "rhs": "bb.20.middle" }
-        ]
-      },
-      "sell_condition": {
-        "entry": [
-          { "type": "threshold", "lhs": "bbwidth.20", "op": "<=", "value": 0.12 },
-          { "type": "crosses_below", "lhs": "close", "rhs": "bb.20.middle" }
-        ],
-        "exit": [
-          { "type": "crosses_above", "lhs": "close", "rhs": "bb.20.middle" }
-        ]
-      }
+    "buy_conditions": {
+      "all": [
+        {
+          "indicator1": "macd.MACD_12_26_9",
+          "operator": "crosses_above",
+          "indicator2": "macd.MACDs_12_26_9"
+        }
+      ]
+    },
+    "sell_conditions": {
+      "all": [
+        {
+          "indicator1": "macd.MACD_12_26_9",
+          "operator": "crosses_below",
+          "indicator2": "macd.MACDs_12_26_9"
+        }
+      ]
+    },
+    "trade_settings": {
+      "order_amount_percent": 100
     }
   }
 ]
