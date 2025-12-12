@@ -438,7 +438,7 @@ class BacktestService:
             "position_history": position_history
         }
 
-    async def run(self, ticker: str, start_date: str, end_date: str, user_id: int) -> Dict:
+    async def run(self, ticker: str, start_date: str, end_date: str, user_id: int, strategy_id: int | None = None) -> Dict:
         """백테스팅을 실행하고 결과를 DB에 저장합니다."""
         repo = BacktestRepository()
         ticker_repo = TickerRepository()
@@ -448,12 +448,18 @@ class BacktestService:
             # 1. Ticker ID 조회
             ticker_id = await ticker_repo.resolve_symbol_to_id(ticker, self.db)
 
-            # 2. Strategy 생성 (또는 재사용)
-            strategy = await repo.create_or_get_strategy(
-                db=self.db,
-                user_id=user_id,
-                strategy_definition=self.strategy
-            )
+            # 2. Strategy ID 처리: 기존 strategy_id가 제공되면 사용, 없으면 생성
+            if strategy_id is not None:
+                # 기존 전략 사용 (새로운 전략 생성하지 않음)
+                final_strategy_id = strategy_id
+            else:
+                # 새 전략 생성 (LLM이 생성한 경우)
+                strategy = await repo.create_or_get_strategy(
+                    db=self.db,
+                    user_id=user_id,
+                    strategy_definition=self.strategy
+                )
+                final_strategy_id = strategy.strategy_id
 
             # 3. BacktestJob 생성
             from datetime import datetime
@@ -463,7 +469,7 @@ class BacktestService:
             job = await repo.create_backtest_job(
                 db=self.db,
                 user_id=user_id,
-                strategy_id=strategy.strategy_id,
+                strategy_id=final_strategy_id,
                 ticker_id=ticker_id,
                 start_date=start_date_obj,
                 end_date=end_date_obj,

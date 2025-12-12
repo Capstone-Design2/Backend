@@ -35,6 +35,7 @@ async def run_backtest(
             start_date=str(req.start_date),
             end_date=str(req.end_date),
             user_id=current_user.user_id,
+            strategy_id=req.strategy_id,
         )
         return result
     except Exception as e:
