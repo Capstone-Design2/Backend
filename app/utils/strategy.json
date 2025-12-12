@@ -92,7 +92,7 @@
         {
           "indicator1": "rsi14",
           "operator": "is_below",
-          "indicator2": 30
+          "indicator2": "30"
         }
       ]
     },
@@ -101,7 +101,7 @@
         {
           "indicator1": "rsi14",
           "operator": "is_above",
-          "indicator2": 70
+          "indicator2": "70"
         }
       ]
     },

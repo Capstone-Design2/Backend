@@ -205,6 +205,7 @@ class RunBacktestRequest(BaseModel):
     start_date: date = Field(description="시작일 (YYYY-MM-DD)")
     end_date: date = Field(description="종료일 (YYYY-MM-DD)")
     strategy_definition: StrategyDefinitionSchema = Field(description="LLM이 생성한 전략 정의 JSON")
+    strategy_id: Optional[int] = Field(None, description="기존 전략 ID (제공 시 새 전략 생성하지 않음)")
 
     # ✅ Pydantic v2 설정 + Swagger 예제 고정(각 그룹은 all/any 중 하나만)
     model_config = ConfigDict(

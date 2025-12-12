@@ -254,8 +254,11 @@ class OrderExecutor:
 
             position.quantity -= order.quantity
 
-            if position.quantity == 0:
-                # 수량이 0이면 삭제
+            # Decimal 비교는 정확한 0과 비교하거나, 매우 작은 값과 비교
+            if position.quantity <= Decimal('0.00000001'):
+                # 수량이 0 또는 음수이면 삭제 (부동소수점 오차 고려)
+                # expunge를 통해 세션에서 제거하여 autoflush 방지
+                db.expunge(position)
                 await self.position_repo.delete_position(db, position.position_id)
             else:
                 await self.position_repo.upsert_position(db, position)
