@@ -67,8 +67,13 @@ class PositionResponse(BaseModel):
     position_id: int
     account_id: int
     ticker_id: int
+    ticker_code: Optional[str] = None
     quantity: float
     average_buy_price: float
+    current_price: Optional[float] = None
+    position_value: Optional[float] = None
+    profit_loss: Optional[float] = None
+    profit_loss_rate: Optional[float] = None
 
 
 class BalanceResponse(BaseModel):
@@ -291,18 +296,51 @@ async def get_positions(
     current_user: Annotated[SimpleNamespace, Depends(get_current_user)],
     service: Annotated[PaperTradingService, Depends(get_paper_trading_service)],
 ):
-    positions = await service.get_positions(db, current_user.user_id)
+    from app.repositories.ticker import TickerRepository
+    from app.models.price_data import PriceData
+    from sqlalchemy import select, desc
 
-    return [
-        PositionResponse(
+    positions = await service.get_positions(db, current_user.user_id)
+    ticker_repo = TickerRepository()
+
+    result = []
+    for pos in positions:
+        # Ticker 정보 조회
+        ticker = await ticker_repo.get_symbol_by_id(pos.ticker_id, db)
+        ticker_code = ticker.kis_code if ticker else None
+
+        # 실시간 가격 조회 (DB에서 최신 1m 캔들)
+        stmt = (
+            select(PriceData.close)
+            .where(PriceData.ticker_id == pos.ticker_id)
+            .where(PriceData.timeframe == "1m")
+            .order_by(desc(PriceData.timestamp))
+            .limit(1)
+        )
+        price_result = await db.execute(stmt)
+        latest_price = price_result.scalar_one_or_none()
+
+        # 현재가 계산 (실시간 가격이 없으면 평균 매입가 사용)
+        current_price = float(latest_price) if latest_price is not None else float(pos.average_buy_price)
+        position_value = float(pos.quantity) * current_price
+        avg_buy_value = float(pos.quantity * pos.average_buy_price)
+        profit_loss = position_value - avg_buy_value
+        profit_loss_rate = (profit_loss / avg_buy_value * 100) if avg_buy_value > 0 else 0.0
+
+        result.append(PositionResponse(
             position_id=pos.position_id,
             account_id=pos.account_id,
             ticker_id=pos.ticker_id,
+            ticker_code=ticker_code,
             quantity=float(pos.quantity),
             average_buy_price=float(pos.average_buy_price),
-        )
-        for pos in positions
-    ]
+            current_price=current_price,
+            position_value=position_value,
+            profit_loss=profit_loss,
+            profit_loss_rate=profit_loss_rate,
+        ))
+
+    return result
 
 
 @router.get(

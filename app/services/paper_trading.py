@@ -21,6 +21,8 @@ from app.repositories.paper_trading import (
     ExecutionRepository,
 )
 from app.repositories.ticker import TickerRepository
+from app.models.price_data import PriceData
+from sqlalchemy import select, desc
 
 
 class PaperTradingService:
@@ -32,6 +34,30 @@ class PaperTradingService:
         self.position_repo = PositionRepository()
         self.execution_repo = ExecutionRepository()
         self.ticker_repo = TickerRepository()
+
+    # ========== 헬퍼 메서드 ==========
+
+    async def _get_latest_price(self, db: AsyncSession, ticker_id: int) -> Optional[Decimal]:
+        """
+        DB에서 최신 시세를 조회합니다 (1m 캔들 기준)
+
+        Args:
+            db: DB 세션
+            ticker_id: 티커 ID
+
+        Returns:
+            최신 종가 (Decimal) 또는 None
+        """
+        stmt = (
+            select(PriceData.close)
+            .where(PriceData.ticker_id == ticker_id)
+            .where(PriceData.timeframe == "1m")
+            .order_by(desc(PriceData.timestamp))
+            .limit(1)
+        )
+        result = await db.execute(stmt)
+        price = result.scalar_one_or_none()
+        return price
 
     # ========== 계좌 관리 ==========
 
@@ -184,15 +210,21 @@ class PaperTradingService:
     async def get_balance(
         self, db: AsyncSession, user_id: int
     ) -> dict:
-        """잔고 및 자산 평가"""
+        """잔고 및 자산 평가 (실시간 시세 반영)"""
         account = await self.get_account(db, user_id)
         positions = await self.position_repo.get_positions_by_account(db, account.account_id)
 
-        # 포지션 평가액 계산 (현재는 평균 매입가 기준)
-        # TODO: 실시간 시세 반영 필요
-        total_position_value = sum(
-            pos.quantity * pos.average_buy_price for pos in positions
-        )
+        # 포지션 평가액 계산 (실시간 시세 반영)
+        total_position_value = Decimal("0")
+
+        for pos in positions:
+            # DB에서 최신 가격 조회 (1m 캔들)
+            latest_price = await self._get_latest_price(db, pos.ticker_id)
+
+            # 최신 가격이 없으면 평균 매입가 사용
+            current_price = latest_price if latest_price is not None else pos.average_buy_price
+
+            total_position_value += pos.quantity * current_price
 
         return {
             "account_id": account.account_id,
