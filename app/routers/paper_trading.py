@@ -198,6 +198,10 @@ async def submit_order(
     current_user: Annotated[SimpleNamespace, Depends(get_current_user)],
     service: Annotated[PaperTradingService, Depends(get_paper_trading_service)],
 ):
+    from logging import getLogger
+    logger = getLogger(__name__)
+    logger.info(f"[주문 요청] ticker_code={request.ticker_code}, side={request.side}, quantity={request.quantity}")
+
     order = await service.submit_order(
         db,
         user_id=current_user.user_id,
