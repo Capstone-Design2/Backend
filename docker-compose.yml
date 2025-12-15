@@ -1,27 +1,61 @@
-version: "3.9"
-
 services:
   db:
-    image: postgres:14
-    container_name: postgres
+    image: postgres:14-alpine
+    container_name: caps_lock_db
+    restart: always
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: trading
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PWD:-3050}
+      POSTGRES_DB: ${DB_NAME:-caps_lock}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "${DB_PORT:-5432}:5432"
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   backend:
-    build: .
-    container_name: fastapi
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: caps_lock_backend
+    restart: always
     depends_on:
-      - db
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@db:5432/trading
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DEPLOY_PHASE=production
     ports:
       - "8000:8000"
+    networks:
+      - app-network
+
+  frontend:
+    build:
+      context: ../Frontend
+      dockerfile: Dockerfile
+    container_name: caps_lock_frontend
+    restart: always
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+    networks:
+      - app-network
 
 volumes:
   postgres_data:
+    driver: local
+
+networks:
+  app-network:
+    driver: bridge
