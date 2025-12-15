@@ -123,3 +123,4 @@ urllib3==2.5.0
 Pygments==2.19.2
 pycparser==2.23
 rsa==4.9.1
+pydantic-settings==2.2.1
